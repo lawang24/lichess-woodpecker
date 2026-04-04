@@ -8,11 +8,12 @@ import {
   LineElement,
   Filler,
   Legend,
+  Tooltip,
 } from 'chart.js'
 import { api } from '../api.js'
 import { getScheduleForCycle } from '../schedule.js'
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Legend)
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Legend, Tooltip)
 
 function toDateStr(d) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -132,7 +133,14 @@ export default function Training({ cycleId, cycleNumber, onFinish, children }) {
 
   const chartOptions = {
     responsive: true,
-    plugins: { legend: { labels: { color: '#999' } } },
+    plugins: {
+      legend: { labels: { color: '#999' } },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}`,
+        },
+      },
+    },
     scales: {
       y: { beginAtZero: true, grid: { color: '#333' }, ticks: { color: '#999' } },
       x: { grid: { color: '#333' }, ticks: { color: '#999' } },

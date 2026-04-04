@@ -1,6 +1,18 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Line } from 'react-chartjs-2'
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Filler,
+  Legend,
+  Tooltip,
+} from 'chart.js'
 import { api } from '../api.js'
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Legend, Tooltip)
 
 function toDateStr(d) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -72,7 +84,14 @@ export default function RatingChart({ startDate, endDate }) {
 
   const chartOptions = {
     responsive: true,
-    plugins: { legend: { labels: { color: '#999' } } },
+    plugins: {
+      legend: { labels: { color: '#999' } },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => `Rating: ${ctx.parsed.y}`,
+        },
+      },
+    },
     scales: {
       y: {
         min: chartData?.center - 300,
