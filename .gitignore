@@ -17,7 +17,7 @@ wheels/
 *.db
 
 # Claude Code
-.claude/settings.local.json
+.claude
 
 # Full Lichess puzzle CSV (only lightweight data/puzzles.csv.zst is tracked)
 puzzles/lichess_db_puzzle.csv.zst

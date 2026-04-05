@@ -8,6 +8,7 @@ export default function Dashboard({ history, targetRating }) {
       {completedCycles.length === 0 ? (
         <div className="card" style={{ color: 'var(--text-dim)' }}>No completed cycles yet.</div>
       ) : (
+        <div className="table-wrap">
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ color: 'var(--text-dim)', fontSize: '0.85rem', textAlign: 'left' }}>
@@ -40,6 +41,7 @@ export default function Dashboard({ history, targetRating }) {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </>
   )

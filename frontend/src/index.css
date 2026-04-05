@@ -188,3 +188,43 @@ li:has(+ li > .day-separator) .puzzle-item {
 .stat .label { font-size: 0.75rem; color: var(--text-dim); }
 
 .back-link { display: inline-block; margin-bottom: 12px; font-size: 0.85rem; }
+
+/* Dashboard table wrapper */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  body { padding: 12px; }
+
+  .header { flex-wrap: wrap; gap: 8px; }
+
+  .card-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .form-row {
+    flex-wrap: wrap;
+  }
+  .form-row input,
+  .form-row select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .goals-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .table-wrap table {
+    font-size: 0.8rem;
+  }
+  .table-wrap th,
+  .table-wrap td {
+    padding: 6px !important;
+  }
+}
