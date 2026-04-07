@@ -53,6 +53,8 @@ export default function SetDetail() {
         <button className="secondary" onClick={resetSet}>Reset</button>
       </div>
 
+      <TimelineBar history={history} />
+
       <Dashboard history={history} targetRating={setData.set.target_rating} />
 
       {activeCycle ? (
@@ -65,10 +67,7 @@ export default function SetDetail() {
             const tl = computeTimeline(history.cycles)
             if (tl.state === 'not-started') return null
             const endDate = tl.state === 'complete' ? tl.finishDate : tl.projectedFinish
-            return <>
-              <TimelineBar history={history} />
-              <RatingChart startDate={tl.startDate} endDate={endDate} />
-            </>
+            return <RatingChart startDate={tl.startDate} endDate={endDate} />
           })()}
         </Training>
       ) : (
