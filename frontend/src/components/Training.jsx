@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import { Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -10,7 +10,6 @@ import {
   Legend,
   Tooltip,
 } from 'chart.js'
-import { api } from '../api.js'
 import { getScheduleForCycle } from '../schedule.js'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Legend, Tooltip)
@@ -19,34 +18,7 @@ function toDateStr(d) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-export default function Training({ cycleId, cycleNumber, onFinish, children }) {
-  const [puzzles, setPuzzles] = useState([])
-  const [cycle, setCycle] = useState(null)
-  const currentRef = useRef(null)
-
-  const loadCycle = useCallback(async () => {
-    const data = await api(`/api/cycles/${cycleId}`)
-    setPuzzles(data.puzzles)
-    setCycle(data.cycle)
-  }, [cycleId])
-
-  useEffect(() => { loadCycle() }, [loadCycle])
-
-  async function completePuzzle(puzzleId) {
-    await api(`/api/cycles/${cycleId}/complete/${puzzleId}`, { method: 'POST' })
-    await loadCycle()
-  }
-
-  async function uncompletePuzzle(puzzleId) {
-    await api(`/api/cycles/${cycleId}/complete/${puzzleId}`, { method: 'DELETE' })
-    await loadCycle()
-  }
-
-  async function finishCycle() {
-    await api(`/api/cycles/${cycleId}/finish`, { method: 'PATCH' })
-    onFinish()
-  }
-
+export default function Training({ cycle, puzzles, onFinishCycle, onJumpToCurrent }) {
   const chartData = useMemo(() => {
     if (!cycle || puzzles.length === 0) return null
 
@@ -123,7 +95,7 @@ export default function Training({ cycleId, cycleNumber, onFinish, children }) {
 
   const completed = puzzles.filter(p => p.completed).length
   const total = puzzles.length
-  const firstUncompleted = puzzles.findIndex(p => !p.completed)
+  const hasCurrentPuzzle = puzzles.some(p => !p.completed)
   const schedule = getScheduleForCycle(cycle.cycle_number)
   const dailyGoal = Math.ceil(total / schedule.days)
   const startDate = new Date(cycle.started_at)
@@ -153,19 +125,19 @@ export default function Training({ cycleId, cycleNumber, onFinish, children }) {
         <div className="card-row">
           <div>
             <strong>Active Cycle</strong>
-            <span style={{ color: 'var(--text-dim)' }}> #{cycleNumber}</span>
+            <span style={{ color: 'var(--text-dim)' }}> #{cycle.cycle_number}</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {firstUncompleted >= 0 && (
+            {hasCurrentPuzzle && (
               <button
                 className="secondary"
-                onClick={() => currentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                onClick={onJumpToCurrent}
               >
                 Jump to current
               </button>
             )}
             <button
-              onClick={finishCycle}
+              onClick={onFinishCycle}
               style={allDone ? { background: 'var(--success)' } : undefined}
             >
               Finish Cycle
@@ -210,37 +182,60 @@ export default function Training({ cycleId, cycleNumber, onFinish, children }) {
           <Line data={chartData} options={chartOptions} />
         </div>
       )}
-
-      {children}
-
-      <ul className="puzzle-list">
-        {puzzles.map((p, i) => {
-          const showSeparator = i > 0 && i % dailyGoal === 0
-          const dayNum = Math.floor(i / dailyGoal) + 1
-          return (
-            <li key={p.puzzle_id} ref={i === firstUncompleted ? currentRef : undefined}>
-              {showSeparator && (
-                <div className="day-separator">Day {dayNum}</div>
-              )}
-              <div className={`puzzle-item ${p.completed ? 'completed' : ''}`}>
-                <a
-                  className="puzzle-link"
-                  href={`https://lichess.org/training/${p.puzzle_id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => { if (!p.completed) completePuzzle(p.puzzle_id) }}
-                  onContextMenu={(e) => { if (p.completed) { e.preventDefault(); uncompletePuzzle(p.puzzle_id) } }}
-                >
-                  <span className="check">{p.completed ? '\u2713' : ''}</span>
-                  <span className="num">#{i + 1}</span>
-                  <span>{p.puzzle_id}</span>
-                  {p.completed && <span className="rating">{p.rating}</span>}
-                </a>
-              </div>
-            </li>
-          )
-        })}
-      </ul>
     </div>
+  )
+}
+
+export function TrainingPuzzleList({
+  cycle,
+  puzzles,
+  currentPuzzleRef,
+  onCompletePuzzle,
+  onUncompletePuzzle,
+}) {
+  if (!cycle) return null
+
+  const schedule = getScheduleForCycle(cycle.cycle_number)
+  const dailyGoal = Math.ceil(puzzles.length / schedule.days)
+  const firstUncompleted = puzzles.findIndex(p => !p.completed)
+
+  return (
+    <ul className="puzzle-list">
+      {puzzles.map((puzzle, index) => {
+        const showSeparator = index > 0 && index % dailyGoal === 0
+        const dayNum = Math.floor(index / dailyGoal) + 1
+
+        return (
+          <li
+            key={puzzle.puzzle_id}
+            ref={index === firstUncompleted ? currentPuzzleRef : undefined}
+          >
+            {showSeparator && (
+              <div className="day-separator">Day {dayNum}</div>
+            )}
+            <div className={`puzzle-item ${puzzle.completed ? 'completed' : ''}`}>
+              <a
+                className="puzzle-link"
+                href={`https://lichess.org/training/${puzzle.puzzle_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => { if (!puzzle.completed) onCompletePuzzle(puzzle.puzzle_id) }}
+                onContextMenu={(event) => {
+                  if (puzzle.completed) {
+                    event.preventDefault()
+                    onUncompletePuzzle(puzzle.puzzle_id)
+                  }
+                }}
+              >
+                <span className="check">{puzzle.completed ? '\u2713' : ''}</span>
+                <span className="num">#{index + 1}</span>
+                <span>{puzzle.puzzle_id}</span>
+                {puzzle.completed && <span className="rating">{puzzle.rating}</span>}
+              </a>
+            </div>
+          </li>
+        )
+      })}
+    </ul>
   )
 }

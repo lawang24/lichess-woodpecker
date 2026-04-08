@@ -1,6 +1,6 @@
 import { getScheduleForCycle } from '../schedule.js'
 
-export default function Dashboard({ history, targetRating }) {
+export default function Dashboard({ history }) {
   const completedCycles = history.cycles.filter(c => c.duration_days !== null)
 
   return (
