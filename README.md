@@ -27,11 +27,15 @@ DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:5432/postgres
 cd backend && uv sync && cd ..
 cd frontend && npm install && cd ..
 
+# Build the compact puzzle catalog (one-time or after puzzles.csv.zst changes)
+cd backend && .venv/bin/python build_puzzle_catalog.py && cd ..
+
 # Run both servers
 ./dev.sh
 ```
 
 The app runs at `http://localhost:5173` (frontend) with the API at `http://localhost:8000`.
+Puzzle sampling uses memory-mapped NumPy arrays built from `backend/data/puzzles.csv.zst`, so build the compact catalog before creating sets.
 
 For production, build the frontend (`npm run build` in `frontend/`) and the backend serves it directly from `backend/static/`.
 
@@ -41,13 +45,13 @@ After the production build refactor, `backend/` is the deploy root on Render.
 
 - **Runtime:** `Python 3`
 - **Root Directory:** `backend`
-- **Build Command:** `cd ../frontend && npm ci && npm run build && cd ../backend && uv sync`
+- **Build Command:** `cd ../frontend && npm ci && npm run build && cd ../backend && uv sync && .venv/bin/python build_puzzle_catalog.py`
 - **Start Command:** `uv run python main.py`
 
 Set `DATABASE_URL` from a Render Postgres instance.
 
 ## Stack
 
-- **Backend:** FastAPI, PostgreSQL, Pandas
+- **Backend:** FastAPI, PostgreSQL, NumPy
 - **Frontend:** React, Vite, Chart.js
 - **Data:** Lichess puzzle DB (stripped to ID + rating, ~32MB compressed)

@@ -3,18 +3,18 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 try:
     from .database import get_db, init_db
+    from .puzzle_catalog import CatalogNotBuiltError, PuzzleCatalog
 except ImportError:
     from database import get_db, init_db
+    from puzzle_catalog import CatalogNotBuiltError, PuzzleCatalog
 
 BACKEND_DIR = os.path.abspath(os.path.dirname(__file__))
-PUZZLE_CSV = os.path.join(BACKEND_DIR, "data", "puzzles.csv.zst")
 FRONTEND_DIST = os.path.join(BACKEND_DIR, "static")
 FRONTEND_DEV_URL = os.environ.get("FRONTEND_DEV_URL", "").rstrip("/")
 TIMESTAMP_FIELDS = {"created_at", "started_at", "completed_at"}
@@ -54,7 +54,6 @@ def _resolve_frontend_file(full_path: str) -> str | None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    app.state.puzzle_df = pd.read_csv(PUZZLE_CSV, usecols=["PuzzleId", "Rating"])
     yield
 
 
@@ -125,51 +124,48 @@ async def get_set(set_id: int):
     return {"set": _utc_dict(puzzle_set), "puzzles": [dict(item) for item in items]}
 
 
-RATING_BANDS = [
-    (0.50, -150, 150),
-    (0.30, -400, -150),
-    (0.15, 150, 300),
-    (0.05, 300, None),
-]
+_puzzle_catalog = None
 
 
-def _sample_by_rating(df: pd.DataFrame, count: int, rating: int) -> pd.DataFrame:
-    parts = []
-    for weight, low_offset, high_offset in RATING_BANDS:
-        sample_size = round(count * weight)
-        low = rating + low_offset
-        band = df[df["Rating"] >= low]
-        if high_offset is not None:
-            band = band[band["Rating"] <= rating + high_offset]
-        parts.append(band.sample(n=min(sample_size, len(band))))
-    return pd.concat(parts).drop_duplicates(subset="PuzzleId")
+def _get_puzzle_catalog() -> PuzzleCatalog:
+    global _puzzle_catalog
+
+    if _puzzle_catalog is None:
+        _puzzle_catalog = PuzzleCatalog.load()
+
+    return _puzzle_catalog
 
 
 @app.post("/api/sets")
 async def create_set(request: Request):
     body = await request.json()
     name = body.get("name", "Untitled Set")
-    count = body.get("count", 50)
+    count = int(body.get("count", 50))
     rating = body.get("rating")
+    target_rating = int(rating) if rating is not None else None
 
-    df = request.app.state.puzzle_df
-    if rating:
-        sample = _sample_by_rating(df, count, int(rating))
+    try:
+        catalog = _get_puzzle_catalog()
+    except CatalogNotBuiltError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+    if target_rating is not None:
+        sample = catalog.sample_by_rating(count, target_rating)
     else:
-        sample = df.sample(n=min(count, len(df)))
+        sample = catalog.sample_random(count)
 
     db = get_db()
     set_id = db.execute(
         "INSERT INTO puzzle_sets (name, target_rating) VALUES (%s, %s) RETURNING id",
-        (name, rating),
+        (name, target_rating),
     ).fetchone()["id"]
-    for index, (_, row) in enumerate(sample.iterrows()):
+    for index, row in enumerate(sample):
         db.execute(
             """
             INSERT INTO puzzle_set_items (set_id, puzzle_id, rating, position)
             VALUES (%s, %s, %s, %s)
             """,
-            (set_id, row["PuzzleId"], int(row["Rating"]), index),
+            (set_id, row["puzzle_id"], int(row["rating"]), index),
         )
     db.commit()
     db.close()

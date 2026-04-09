@@ -21,6 +21,10 @@ wheels/
 
 # Full Lichess puzzle CSV (only lightweight data/puzzles.csv.zst is tracked)
 puzzles/lichess_db_puzzle.csv.zst
+backend/data/puzzle_ids.npy
+backend/data/puzzle_ratings.npy
+backend/data/puzzle_ids.tmp.npy
+backend/data/puzzle_ratings.tmp.npy
 
 # Node / Frontend
 node_modules/

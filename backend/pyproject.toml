@@ -11,11 +11,11 @@ dependencies = [
     "fastapi>=0.135.2",
     "httpx>=0.28.1",
     "itsdangerous>=2.2.0",
-    "pandas>=3.0.1",
+    "numpy>=2.4.3",
     "psycopg[binary]>=3.2.9",
     "uvicorn[standard]>=0.42.0",
     "zstandard>=0.25.0",
 ]
 
 [tool.setuptools]
-py-modules = ["auth", "chess_com", "database", "main"]
+py-modules = ["auth", "chess_com", "database", "main", "puzzle_catalog"]
