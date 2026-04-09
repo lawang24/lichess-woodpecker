@@ -24,7 +24,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
 fi
 
 # Backend
-(cd backend && uv run python main.py) &
+(cd backend && FRONTEND_DEV_URL="${FRONTEND_DEV_URL:-http://localhost:5173}" uv run python main.py) &
 
 # Frontend
 (cd frontend && npm run dev) &

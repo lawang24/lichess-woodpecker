@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 try:
@@ -13,9 +13,10 @@ try:
 except ImportError:
     from database import get_db, init_db
 
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-PUZZLE_CSV = os.path.join(ROOT_DIR, "data", "puzzles.csv.zst")
-FRONTEND_DIST = os.path.join(ROOT_DIR, "frontend", "dist")
+BACKEND_DIR = os.path.abspath(os.path.dirname(__file__))
+PUZZLE_CSV = os.path.join(BACKEND_DIR, "data", "puzzles.csv.zst")
+FRONTEND_DIST = os.path.join(BACKEND_DIR, "static")
+FRONTEND_DEV_URL = os.environ.get("FRONTEND_DEV_URL", "").rstrip("/")
 TIMESTAMP_FIELDS = {"created_at", "started_at", "completed_at"}
 
 
@@ -40,6 +41,16 @@ def _utc_dict(row) -> dict:
     return d
 
 
+def _resolve_frontend_file(full_path: str) -> str | None:
+    candidate = os.path.abspath(os.path.join(FRONTEND_DIST, full_path))
+    static_root = os.path.abspath(FRONTEND_DIST)
+    if os.path.commonpath([candidate, static_root]) != static_root:
+        return None
+    if os.path.isfile(candidate):
+        return candidate
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -49,7 +60,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-if os.path.isdir(FRONTEND_DIST):
+if not FRONTEND_DEV_URL and os.path.isdir(FRONTEND_DIST):
     app.mount(
         "/assets",
         StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")),
@@ -380,7 +391,17 @@ async def get_chess_com_ratings(start_date: str = None, end_date: str = None):
 
 
 @app.get("/{full_path:path}")
-async def serve_spa(full_path: str):
+async def serve_spa(full_path: str, request: Request):
+    if FRONTEND_DEV_URL:
+        target_path = f"/{full_path}" if full_path else "/"
+        query = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse(f"{FRONTEND_DEV_URL}{target_path}{query}")
+
+    if full_path:
+        static_file = _resolve_frontend_file(full_path)
+        if static_file:
+            return FileResponse(static_file)
+
     index_path = os.path.join(FRONTEND_DIST, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)

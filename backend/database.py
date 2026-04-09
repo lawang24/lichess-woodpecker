@@ -5,10 +5,15 @@ from psycopg import connect
 from psycopg.rows import dict_row
 
 SCHEMA_PATH = Path(__file__).resolve().with_name("schema.sql")
+BACKEND_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BACKEND_DIR.parent
 ENV_PATHS = (
-    Path(__file__).resolve().parent.parent / ".env",
-    Path(__file__).resolve().parent.parent / ".env.local",
+    BACKEND_DIR / ".env",
+    BACKEND_DIR / ".env.local",
+    PROJECT_ROOT / ".env",
+    PROJECT_ROOT / ".env.local",
 )
+ORIGINAL_ENV_KEYS = set(os.environ)
 
 
 def _load_env_files() -> None:
@@ -21,7 +26,10 @@ def _load_env_files() -> None:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+            key = key.strip()
+            if key in ORIGINAL_ENV_KEYS:
+                continue
+            os.environ[key] = value.strip().strip("'\"")
 
 
 _load_env_files()

@@ -33,7 +33,18 @@ cd frontend && npm install && cd ..
 
 The app runs at `http://localhost:5173` (frontend) with the API at `http://localhost:8000`.
 
-For production, build the frontend (`npm run build` in `frontend/`) and the backend serves it directly.
+For production, build the frontend (`npm run build` in `frontend/`) and the backend serves it directly from `backend/static/`.
+
+## Render
+
+After the production build refactor, `backend/` is the deploy root on Render.
+
+- **Runtime:** `Python 3`
+- **Root Directory:** `backend`
+- **Build Command:** `cd ../frontend && npm ci && npm run build && cd ../backend && uv sync`
+- **Start Command:** `uv run python main.py`
+
+Set `DATABASE_URL` from a Render Postgres instance.
 
 ## Stack
 
