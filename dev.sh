@@ -6,6 +6,23 @@ trap 'kill 0' EXIT
 
 cd "$(dirname "$0")"
 
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
+fi
+
+if [ -f .env.local ]; then
+  set -a
+  source .env.local
+  set +a
+fi
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "DATABASE_URL is required" >&2
+  exit 1
+fi
+
 # Backend
 (cd backend && uv run python main.py) &
 

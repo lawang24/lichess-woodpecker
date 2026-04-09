@@ -1,33 +1,39 @@
-import httpx
 from datetime import datetime, timedelta, timezone
-from database import get_db
+
+import httpx
+
+try:
+    from .database import get_db
+except ImportError:
+    from database import get_db
 
 CHESS_COM_BASE = "https://api.chess.com/pub"
 
 
 async def backfill_ratings(username: str, start_date: str, end_date: str) -> dict:
-    # Include the prior month so we have a seed rating for forward-fill
-    prev_month_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(day=1) - timedelta(days=1)
+    prev_month_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(day=1) - timedelta(
+        days=1
+    )
     start_month = prev_month_dt.strftime("%Y/%m")
     end_month = end_date[:7].replace("-", "/")
 
     db = get_db()
     row = db.execute(
-        "SELECT MAX(date) FROM chess_com_ratings WHERE username = ? AND date BETWEEN ? AND ?",
+        """
+        SELECT MAX(date) AS max_date
+        FROM chess_com_ratings
+        WHERE username = %s AND date BETWEEN %s AND %s
+        """,
         (username, start_date, end_date),
     ).fetchone()
-    last_date = row[0] if row else None
-    last_month = last_date[:7].replace("-", "/") if last_date else None
+    last_date = row["max_date"] if row else None
+    last_month = last_date.strftime("%Y/%m") if last_date else None
 
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{CHESS_COM_BASE}/player/{username}/games/archives")
         resp.raise_for_status()
         archives = resp.json()["archives"]
-
-        # Only fetch months within the requested window
         archives = [url for url in archives if start_month <= url[-7:] <= end_month]
-
-        # Skip months we already have, except re-fetch from last stored month onward
         if last_month:
             archives = [url for url in archives if url[-7:] >= last_month]
 
@@ -58,7 +64,9 @@ async def backfill_ratings(username: str, start_date: str, end_date: str) -> dic
                 if not rating:
                     continue
 
-                date_str = datetime.fromtimestamp(end_time, tz=timezone.utc).strftime("%Y-%m-%d")
+                date_str = datetime.fromtimestamp(end_time, tz=timezone.utc).strftime(
+                    "%Y-%m-%d"
+                )
                 if date_str < start_date or date_str > end_date:
                     continue
 
@@ -67,7 +75,12 @@ async def backfill_ratings(username: str, start_date: str, end_date: str) -> dic
 
             for date_str, (rating, _) in daily_ratings.items():
                 db.execute(
-                    "INSERT OR REPLACE INTO chess_com_ratings (username, date, time_class, rating) VALUES (?, ?, ?, ?)",
+                    """
+                    INSERT INTO chess_com_ratings (username, date, time_class, rating)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (username, date, time_class)
+                    DO UPDATE SET rating = EXCLUDED.rating
+                    """,
                     (username, date_str, "rapid", rating),
                 )
                 ratings_upserted += 1
@@ -82,32 +95,45 @@ async def backfill_ratings(username: str, start_date: str, end_date: str) -> dic
 
 def get_ratings(username: str, start_date: str, end_date: str) -> list:
     db = get_db()
-
-    # Get the most recent rating before the window to seed forward-fill
     seed = db.execute(
-        "SELECT rating FROM chess_com_ratings WHERE username = ? AND time_class = 'rapid' AND date <= ? ORDER BY date DESC LIMIT 1",
+        """
+        SELECT rating
+        FROM chess_com_ratings
+        WHERE username = %s AND time_class = 'rapid' AND date <= %s
+        ORDER BY date DESC
+        LIMIT 1
+        """,
         (username, start_date),
     ).fetchone()
 
     rows = db.execute(
-        "SELECT date, rating FROM chess_com_ratings WHERE username = ? AND time_class = 'rapid' AND date BETWEEN ? AND ? ORDER BY date",
+        """
+        SELECT date, rating
+        FROM chess_com_ratings
+        WHERE username = %s AND time_class = 'rapid' AND date BETWEEN %s AND %s
+        ORDER BY date
+        """,
         (username, start_date, end_date),
     ).fetchall()
     db.close()
 
-    rating_map = {r["date"]: r["rating"] for r in rows}
+    rating_map = {
+        row["date"].isoformat() if hasattr(row["date"], "isoformat") else row["date"]: row[
+            "rating"
+        ]
+        for row in rows
+    }
 
-    # Fill every day, carrying forward the previous rating
     result = []
     current_rating = seed["rating"] if seed else None
-    d = datetime.strptime(start_date, "%Y-%m-%d")
+    current_date = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
-    while d <= end:
-        date_str = d.strftime("%Y-%m-%d")
+    while current_date <= end:
+        date_str = current_date.strftime("%Y-%m-%d")
         if date_str in rating_map:
             current_rating = rating_map[date_str]
         if current_rating is not None:
             result.append({"date": date_str, "rating": current_rating})
-        d += timedelta(days=1)
+        current_date += timedelta(days=1)
 
     return result

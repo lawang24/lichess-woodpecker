@@ -14,7 +14,13 @@ Tracks cycle history (completion count, duration) and Chess.com rating over time
 
 ## Setup
 
-**Prerequisites:** Python 3.14+, Node 18+, [uv](https://github.com/astral-sh/uv)
+**Prerequisites:** Python 3.14+, Node 18+, PostgreSQL 16+, [uv](https://github.com/astral-sh/uv)
+
+Add a Postgres connection string in `.env` before starting the backend:
+
+```bash
+DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:5432/postgres
+```
 
 ```bash
 # Install dependencies
@@ -31,6 +37,6 @@ For production, build the frontend (`npm run build` in `frontend/`) and the back
 
 ## Stack
 
-- **Backend:** FastAPI, SQLite, Pandas
+- **Backend:** FastAPI, PostgreSQL, Pandas
 - **Frontend:** React, Vite, Chart.js
 - **Data:** Lichess puzzle DB (stripped to ID + rating, ~32MB compressed)
