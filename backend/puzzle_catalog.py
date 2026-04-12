@@ -41,7 +41,7 @@ class PuzzleCatalog:
 
     def sample_random(self, count: int) -> list[dict]:
         indices = self._pick_random_indices(0, self.size, count)
-        return self._rows_from_indices(indices)
+        return self._rows_from_indices(self._shuffle_indices(indices))
 
     def sample_by_rating(self, count: int, rating: int) -> list[dict]:
         selected = []
@@ -57,7 +57,9 @@ class PuzzleCatalog:
                 used.add(index)
                 selected.append(index)
 
-        return self._rows_from_indices(np.asarray(selected, dtype=np.int64))
+        return self._rows_from_indices(
+            self._shuffle_indices(np.asarray(selected, dtype=np.int64))
+        )
 
     def _band_slice(self, rating: int, low_offset: int, high_offset: int | None):
         low = rating + low_offset
@@ -121,3 +123,8 @@ class PuzzleCatalog:
             {"puzzle_id": puzzle_id.decode("ascii"), "rating": int(rating)}
             for puzzle_id, rating in zip(puzzle_ids, ratings, strict=True)
         ]
+
+    def _shuffle_indices(self, indices: np.ndarray) -> np.ndarray:
+        if len(indices) <= 1:
+            return indices
+        return self._rng.permutation(indices)
