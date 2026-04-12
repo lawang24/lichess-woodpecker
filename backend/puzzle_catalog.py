@@ -7,10 +7,7 @@ DATA_DIR = BACKEND_DIR / "data"
 PUZZLE_IDS_PATH = DATA_DIR / "puzzle_ids.npy"
 PUZZLE_RATINGS_PATH = DATA_DIR / "puzzle_ratings.npy"
 RATING_BANDS = [
-    (0.50, -150, 150),
-    (0.30, -400, -150),
-    (0.15, 150, 300),
-    (0.05, 300, None),
+    (1.0, -200, 200)
 ]
 
 

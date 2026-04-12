@@ -114,39 +114,66 @@ export default function SetDetail() {
   const [currentCycle, setCurrentCycle] = useState(null)
   const [currentCycleDetails, setCurrentCycleDetails] = useState(null)
   const currentPuzzleRef = useRef(null)
+  const latestCycleIdRef = useRef(null)
 
-  const refreshSetDetail = useCallback(async () => {
+  const fetchSetDetailData = useCallback(async () => {
     const [overviewResponse, historyResponse] = await Promise.all([
       api(`/api/sets/${setId}`),
       api(`/api/sets/${setId}/history`),
     ])
-    setSetOverview(overviewResponse)
-    setSetHistory(historyResponse)
-    setCurrentCycle(findCurrentCycle(historyResponse.cycles))
+    const nextCurrentCycle = findCurrentCycle(historyResponse.cycles)
+    const cycleDetails = nextCurrentCycle ? await api(`/api/cycles/${nextCurrentCycle.id}`) : null
+
+    return {
+      overviewResponse,
+      historyResponse,
+      nextCurrentCycle,
+      cycleDetails,
+    }
   }, [setId])
 
   useEffect(() => {
-    refreshSetDetail()
-  }, [refreshSetDetail])
+    let cancelled = false
 
-  const refreshCurrentCycleDetails = useCallback(async () => {
-    if (!currentCycle) {
-      setCurrentCycleDetails(null)
-      return
+    void fetchSetDetailData().then(data => {
+      if (cancelled) {
+        return
+      }
+
+      latestCycleIdRef.current = data.nextCurrentCycle?.id ?? null
+      setSetOverview(data.overviewResponse)
+      setSetHistory(data.historyResponse)
+      setCurrentCycle(data.nextCurrentCycle)
+      setCurrentCycleDetails(data.cycleDetails)
+    })
+
+    return () => {
+      cancelled = true
     }
+  }, [fetchSetDetailData])
 
-    setCurrentCycleDetails(null)
-    const cycleDetails = await api(`/api/cycles/${currentCycle.id}`)
-    setCurrentCycleDetails(cycleDetails)
-  }, [currentCycle])
+  async function refreshSetDetail() {
+    const data = await fetchSetDetailData()
+    latestCycleIdRef.current = data.nextCurrentCycle?.id ?? null
+    setSetOverview(data.overviewResponse)
+    setSetHistory(data.historyResponse)
+    setCurrentCycle(data.nextCurrentCycle)
+    setCurrentCycleDetails(data.cycleDetails)
+  }
 
-  useEffect(() => {
-    refreshCurrentCycleDetails()
-  }, [refreshCurrentCycleDetails])
+  async function refreshCurrentCycleDetails(cycleId = currentCycle?.id) {
+    if (!cycleId) return
+
+    const cycleDetails = await api(`/api/cycles/${cycleId}`)
+    setCurrentCycleDetails(prev => (latestCycleIdRef.current === cycleId ? cycleDetails : prev))
+  }
 
   async function startCycle() {
     const cycle = await api(`/api/sets/${setId}/cycles`, { method: 'POST' })
-    setCurrentCycle({ id: cycle.id, cycle_number: cycle.cycle_number, completed_at: null })
+    const nextCurrentCycle = { id: cycle.id, cycle_number: cycle.cycle_number, completed_at: null }
+    latestCycleIdRef.current = cycle.id
+    setCurrentCycle(nextCurrentCycle)
+    await refreshCurrentCycleDetails(cycle.id)
   }
 
   async function resetSet() {
