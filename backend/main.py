@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -18,6 +19,7 @@ BACKEND_DIR = os.path.abspath(os.path.dirname(__file__))
 FRONTEND_DIST = os.path.join(BACKEND_DIR, "static")
 FRONTEND_DEV_URL = os.environ.get("FRONTEND_DEV_URL", "").rstrip("/")
 TIMESTAMP_FIELDS = {"created_at", "started_at", "completed_at"}
+logger = logging.getLogger("uvicorn.error")
 
 
 def _as_utc_datetime(value):
@@ -49,6 +51,12 @@ def _resolve_frontend_file(full_path: str) -> str | None:
     if os.path.isfile(candidate):
         return candidate
     return None
+
+
+def _truncate_for_log(value: str, limit: int = 80) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[: limit - 3]}..."
 
 
 @asynccontextmanager
@@ -138,38 +146,117 @@ def _get_puzzle_catalog() -> PuzzleCatalog:
 
 @app.post("/api/sets")
 async def create_set(request: Request):
-    body = await request.json()
-    name = body.get("name", "Untitled Set")
-    count = int(body.get("count", 50))
-    rating = body.get("rating")
-    target_rating = int(rating) if rating is not None else None
+    request_started_at = time.perf_counter()
+    phase = "request start"
+    db = None
+    name = "Untitled Set"
+    count = None
+    target_rating = None
+
+    def elapsed_ms() -> float:
+        return (time.perf_counter() - request_started_at) * 1000
 
     try:
-        catalog = _get_puzzle_catalog()
-    except CatalogNotBuiltError as exc:
-        raise HTTPException(503, str(exc)) from exc
-
-    if target_rating is not None:
-        sample = catalog.sample_by_rating(count, target_rating)
-    else:
-        sample = catalog.sample_random(count)
-
-    db = get_db()
-    set_id = db.execute(
-        "INSERT INTO puzzle_sets (name, target_rating) VALUES (%s, %s) RETURNING id",
-        (name, target_rating),
-    ).fetchone()["id"]
-    for index, row in enumerate(sample):
-        db.execute(
-            """
-            INSERT INTO puzzle_set_items (set_id, puzzle_id, rating, position)
-            VALUES (%s, %s, %s, %s)
-            """,
-            (set_id, row["puzzle_id"], int(row["rating"]), index),
+        phase = "request body parse"
+        body = await request.json()
+        name = body.get("name", "Untitled Set")
+        count = int(body.get("count", 50))
+        rating = body.get("rating")
+        target_rating = int(rating) if rating is not None else None
+        logger.info(
+            "create_set started name=%r count=%s rating=%s",
+            _truncate_for_log(name),
+            count,
+            target_rating,
         )
-    db.commit()
-    db.close()
-    return {"id": set_id, "name": name, "count": len(sample)}
+        logger.info("create_set parsed request in %.1fms", elapsed_ms())
+
+        phase = "puzzle catalog load"
+        try:
+            catalog = _get_puzzle_catalog()
+        except CatalogNotBuiltError as exc:
+            logger.error(
+                "create_set failed during %s after %.1fms name=%r count=%s rating=%s: %s",
+                phase,
+                elapsed_ms(),
+                _truncate_for_log(name),
+                count,
+                target_rating,
+                exc,
+            )
+            raise HTTPException(503, str(exc)) from exc
+        logger.info("create_set loaded puzzle catalog in %.1fms", elapsed_ms())
+
+        phase = "puzzle sampling"
+        if target_rating is not None:
+            sample = catalog.sample_by_rating(count, target_rating)
+        else:
+            sample = catalog.sample_random(count)
+        logger.info(
+            "create_set sampled puzzles in %.1fms requested=%s actual=%s",
+            elapsed_ms(),
+            count,
+            len(sample),
+        )
+
+        phase = "database connection"
+        db = get_db()
+        logger.info("create_set acquired database connection in %.1fms", elapsed_ms())
+
+        phase = "set insert"
+        set_id = db.execute(
+            "INSERT INTO puzzle_sets (name, target_rating) VALUES (%s, %s) RETURNING id",
+            (name, target_rating),
+        ).fetchone()["id"]
+        logger.info("create_set inserted puzzle set id=%s in %.1fms", set_id, elapsed_ms())
+
+        phase = "set item bulk insert"
+        if sample:
+            values_sql = ", ".join(["(%s, %s, %s, %s)"] * len(sample))
+            params = []
+            for index, row in enumerate(sample):
+                params.extend((set_id, row["puzzle_id"], int(row["rating"]), index))
+            db.execute(
+                f"""
+                INSERT INTO puzzle_set_items (set_id, puzzle_id, rating, position)
+                VALUES {values_sql}
+                """,
+                params,
+            )
+        logger.info(
+            "create_set bulk inserted %s puzzle_set_items in %.1fms",
+            len(sample),
+            elapsed_ms(),
+        )
+
+        phase = "commit"
+        db.commit()
+        logger.info("create_set committed transaction in %.1fms", elapsed_ms())
+
+        logger.info(
+            "create_set completed id=%s name=%r requested=%s actual=%s total=%.1fms",
+            set_id,
+            _truncate_for_log(name),
+            count,
+            len(sample),
+            elapsed_ms(),
+        )
+        return {"id": set_id, "name": name, "count": len(sample)}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "create_set failed during %s after %.1fms name=%r count=%s rating=%s",
+            phase,
+            elapsed_ms(),
+            _truncate_for_log(name),
+            count,
+            target_rating,
+        )
+        raise
+    finally:
+        if db is not None:
+            db.close()
 
 
 @app.delete("/api/sets/{set_id}")
