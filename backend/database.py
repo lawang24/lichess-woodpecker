@@ -1,8 +1,9 @@
 import os
 from pathlib import Path
+from typing import Any
 
-from psycopg import connect
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 SCHEMA_PATH = Path(__file__).resolve().with_name("schema.sql")
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -14,6 +15,9 @@ ENV_PATHS = (
     PROJECT_ROOT / ".env.local",
 )
 ORIGINAL_ENV_KEYS = set(os.environ)
+DB_POOL_MIN_SIZE = 1
+DB_POOL_MAX_SIZE = 1
+_db_pool: ConnectionPool | None = None
 
 
 def _load_env_files() -> None:
@@ -46,10 +50,78 @@ def get_database_url() -> str:
     )
 
 
+class PooledConnection:
+    def __init__(self, pool: ConnectionPool, conn):
+        self._pool = pool
+        self._conn = conn
+
+    def __getattr__(self, name: str) -> Any:
+        conn = self._require_conn()
+        return getattr(conn, name)
+
+    def __enter__(self):
+        self._require_conn()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        conn = self._conn
+        if conn is None:
+            return
+
+        try:
+            if exc_type is None:
+                conn.commit()
+            else:
+                conn.rollback()
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        conn = self._conn
+        if conn is None:
+            return
+
+        self._conn = None
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        self._pool.putconn(conn)
+
+    def _require_conn(self):
+        if self._conn is None:
+            raise RuntimeError("Database connection has already been released to the pool")
+        return self._conn
+
+
+def _get_db_pool() -> ConnectionPool:
+    global _db_pool
+    if _db_pool is None:
+        _db_pool = ConnectionPool(
+            conninfo=get_database_url(),
+            kwargs={"row_factory": dict_row},
+            min_size=DB_POOL_MIN_SIZE,
+            max_size=DB_POOL_MAX_SIZE,
+        )
+    return _db_pool
+
+
 def get_db():
-    return connect(get_database_url(), row_factory=dict_row)
+    pool = _get_db_pool()
+    return PooledConnection(pool, pool.getconn())
 
 
 def init_db() -> None:
-    with get_db() as conn:
+    pool = _get_db_pool()
+    pool.wait()
+    with pool.connection() as conn:
         conn.execute(SCHEMA_PATH.read_text())
+
+
+def close_db() -> None:
+    global _db_pool
+    if _db_pool is None:
+        return
+
+    _db_pool.close()
+    _db_pool = None

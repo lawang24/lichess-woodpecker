@@ -18,16 +18,19 @@ async def backfill_ratings(username: str, start_date: str, end_date: str) -> dic
     end_month = end_date[:7].replace("-", "/")
 
     db = get_db()
-    row = db.execute(
-        """
-        SELECT MAX(date) AS max_date
-        FROM chess_com_ratings
-        WHERE username = %s AND date BETWEEN %s AND %s
-        """,
-        (username, start_date, end_date),
-    ).fetchone()
-    last_date = row["max_date"] if row else None
-    last_month = last_date.strftime("%Y/%m") if last_date else None
+    try:
+        row = db.execute(
+            """
+            SELECT MAX(date) AS max_date
+            FROM chess_com_ratings
+            WHERE username = %s AND date BETWEEN %s AND %s
+            """,
+            (username, start_date, end_date),
+        ).fetchone()
+        last_date = row["max_date"] if row else None
+        last_month = last_date.strftime("%Y/%m") if last_date else None
+    finally:
+        db.close()
 
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{CHESS_COM_BASE}/player/{username}/games/archives")
@@ -39,6 +42,7 @@ async def backfill_ratings(username: str, start_date: str, end_date: str) -> dic
 
         months_fetched = 0
         ratings_upserted = 0
+        pending_ratings = []
 
         for archive_url in archives:
             resp = await client.get(archive_url)
@@ -74,6 +78,14 @@ async def backfill_ratings(username: str, start_date: str, end_date: str) -> dic
                     daily_ratings[date_str] = (rating, end_time)
 
             for date_str, (rating, _) in daily_ratings.items():
+                pending_ratings.append((username, date_str, "rapid", rating))
+                ratings_upserted += 1
+
+            months_fetched += 1
+
+        db = get_db()
+        try:
+            for row in pending_ratings:
                 db.execute(
                     """
                     INSERT INTO chess_com_ratings (username, date, time_class, rating)
@@ -81,41 +93,40 @@ async def backfill_ratings(username: str, start_date: str, end_date: str) -> dic
                     ON CONFLICT (username, date, time_class)
                     DO UPDATE SET rating = EXCLUDED.rating
                     """,
-                    (username, date_str, "rapid", rating),
+                    row,
                 )
-                ratings_upserted += 1
-
-            months_fetched += 1
-
-        db.commit()
-        db.close()
+            db.commit()
+        finally:
+            db.close()
 
     return {"months_fetched": months_fetched, "ratings_upserted": ratings_upserted}
 
 
 def get_ratings(username: str, start_date: str, end_date: str) -> list:
     db = get_db()
-    seed = db.execute(
-        """
-        SELECT rating
-        FROM chess_com_ratings
-        WHERE username = %s AND time_class = 'rapid' AND date <= %s
-        ORDER BY date DESC
-        LIMIT 1
-        """,
-        (username, start_date),
-    ).fetchone()
+    try:
+        seed = db.execute(
+            """
+            SELECT rating
+            FROM chess_com_ratings
+            WHERE username = %s AND time_class = 'rapid' AND date <= %s
+            ORDER BY date DESC
+            LIMIT 1
+            """,
+            (username, start_date),
+        ).fetchone()
 
-    rows = db.execute(
-        """
-        SELECT date, rating
-        FROM chess_com_ratings
-        WHERE username = %s AND time_class = 'rapid' AND date BETWEEN %s AND %s
-        ORDER BY date
-        """,
-        (username, start_date, end_date),
-    ).fetchall()
-    db.close()
+        rows = db.execute(
+            """
+            SELECT date, rating
+            FROM chess_com_ratings
+            WHERE username = %s AND time_class = 'rapid' AND date BETWEEN %s AND %s
+            ORDER BY date
+            """,
+            (username, start_date, end_date),
+        ).fetchall()
+    finally:
+        db.close()
 
     rating_map = {
         row["date"].isoformat() if hasattr(row["date"], "isoformat") else row["date"]: row[

@@ -9,10 +9,10 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 try:
-    from .database import get_db, init_db
+    from .database import close_db, get_db, init_db
     from .puzzle_catalog import CatalogNotBuiltError, PuzzleCatalog
 except ImportError:
-    from database import get_db, init_db
+    from database import close_db, get_db, init_db
     from puzzle_catalog import CatalogNotBuiltError, PuzzleCatalog
 
 BACKEND_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -62,7 +62,10 @@ def _truncate_for_log(value: str, limit: int = 80) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
+    try:
+        yield
+    finally:
+        close_db()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -78,28 +81,30 @@ if not FRONTEND_DEV_URL and os.path.isdir(FRONTEND_DIST):
 @app.get("/api/sets")
 async def list_sets():
     db = get_db()
-    sets = db.execute(
-        """
-        SELECT
-            s.id,
-            s.name,
-            s.target_rating,
-            s.created_at,
-            COUNT(i.id) AS puzzle_count
-        FROM puzzle_sets s
-        LEFT JOIN puzzle_set_items i ON i.set_id = s.id
-        GROUP BY s.id, s.name, s.target_rating, s.created_at
-        ORDER BY s.created_at DESC
-        """
-    ).fetchall()
-    cycles = db.execute(
-        """
-        SELECT id, set_id, cycle_number, started_at, completed_at
-        FROM cycles
-        ORDER BY cycle_number
-        """
-    ).fetchall()
-    db.close()
+    try:
+        sets = db.execute(
+            """
+            SELECT
+                s.id,
+                s.name,
+                s.target_rating,
+                s.created_at,
+                COUNT(i.id) AS puzzle_count
+            FROM puzzle_sets s
+            LEFT JOIN puzzle_set_items i ON i.set_id = s.id
+            GROUP BY s.id, s.name, s.target_rating, s.created_at
+            ORDER BY s.created_at DESC
+            """
+        ).fetchall()
+        cycles = db.execute(
+            """
+            SELECT id, set_id, cycle_number, started_at, completed_at
+            FROM cycles
+            ORDER BY cycle_number
+            """
+        ).fetchall()
+    finally:
+        db.close()
 
     cycles_by_set = {}
     for cycle in cycles:
@@ -117,18 +122,19 @@ async def list_sets():
 @app.get("/api/sets/{set_id}")
 async def get_set(set_id: int):
     db = get_db()
-    puzzle_set = db.execute(
-        "SELECT * FROM puzzle_sets WHERE id = %s",
-        (set_id,),
-    ).fetchone()
-    if not puzzle_set:
+    try:
+        puzzle_set = db.execute(
+            "SELECT * FROM puzzle_sets WHERE id = %s",
+            (set_id,),
+        ).fetchone()
+        if not puzzle_set:
+            raise HTTPException(404, "Set not found")
+        items = db.execute(
+            "SELECT * FROM puzzle_set_items WHERE set_id = %s ORDER BY position",
+            (set_id,),
+        ).fetchall()
+    finally:
         db.close()
-        raise HTTPException(404, "Set not found")
-    items = db.execute(
-        "SELECT * FROM puzzle_set_items WHERE set_id = %s ORDER BY position",
-        (set_id,),
-    ).fetchall()
-    db.close()
     return {"set": _utc_dict(puzzle_set), "puzzles": [dict(item) for item in items]}
 
 
@@ -262,69 +268,75 @@ async def create_set(request: Request):
 @app.delete("/api/sets/{set_id}")
 async def delete_set(set_id: int):
     db = get_db()
-    db.execute("DELETE FROM puzzle_sets WHERE id = %s", (set_id,))
-    db.commit()
-    db.close()
+    try:
+        db.execute("DELETE FROM puzzle_sets WHERE id = %s", (set_id,))
+        db.commit()
+    finally:
+        db.close()
     return {"ok": True}
 
 
 @app.post("/api/sets/{set_id}/reset")
 async def reset_set(set_id: int):
     db = get_db()
-    db.execute("DELETE FROM cycles WHERE set_id = %s", (set_id,))
-    db.commit()
-    db.close()
+    try:
+        db.execute("DELETE FROM cycles WHERE set_id = %s", (set_id,))
+        db.commit()
+    finally:
+        db.close()
     return {"ok": True}
 
 
 @app.post("/api/sets/{set_id}/cycles")
 async def start_cycle(set_id: int):
     db = get_db()
-    puzzle_set = db.execute(
-        "SELECT * FROM puzzle_sets WHERE id = %s",
-        (set_id,),
-    ).fetchone()
-    if not puzzle_set:
+    try:
+        puzzle_set = db.execute(
+            "SELECT * FROM puzzle_sets WHERE id = %s",
+            (set_id,),
+        ).fetchone()
+        if not puzzle_set:
+            raise HTTPException(404, "Set not found")
+        last_cycle = db.execute(
+            "SELECT MAX(cycle_number) AS n FROM cycles WHERE set_id = %s",
+            (set_id,),
+        ).fetchone()
+        next_num = (last_cycle["n"] or 0) + 1
+        cycle_id = db.execute(
+            """
+            INSERT INTO cycles (set_id, cycle_number)
+            VALUES (%s, %s)
+            RETURNING id
+            """,
+            (set_id, next_num),
+        ).fetchone()["id"]
+        db.commit()
+    finally:
         db.close()
-        raise HTTPException(404, "Set not found")
-    last_cycle = db.execute(
-        "SELECT MAX(cycle_number) AS n FROM cycles WHERE set_id = %s",
-        (set_id,),
-    ).fetchone()
-    next_num = (last_cycle["n"] or 0) + 1
-    cycle_id = db.execute(
-        """
-        INSERT INTO cycles (set_id, cycle_number)
-        VALUES (%s, %s)
-        RETURNING id
-        """,
-        (set_id, next_num),
-    ).fetchone()["id"]
-    db.commit()
-    db.close()
     return {"id": cycle_id, "cycle_number": next_num}
 
 
 @app.get("/api/cycles/{cycle_id}")
 async def get_cycle(cycle_id: int):
     db = get_db()
-    cycle = db.execute(
-        "SELECT * FROM cycles WHERE id = %s",
-        (cycle_id,),
-    ).fetchone()
-    if not cycle:
+    try:
+        cycle = db.execute(
+            "SELECT * FROM cycles WHERE id = %s",
+            (cycle_id,),
+        ).fetchone()
+        if not cycle:
+            raise HTTPException(404, "Cycle not found")
+        cycle = _utc_dict(cycle)
+        items = db.execute(
+            "SELECT * FROM puzzle_set_items WHERE set_id = %s ORDER BY position",
+            (cycle["set_id"],),
+        ).fetchall()
+        completions = db.execute(
+            "SELECT puzzle_id, completed_at FROM cycle_completions WHERE cycle_id = %s",
+            (cycle_id,),
+        ).fetchall()
+    finally:
         db.close()
-        raise HTTPException(404, "Cycle not found")
-    cycle = _utc_dict(cycle)
-    items = db.execute(
-        "SELECT * FROM puzzle_set_items WHERE set_id = %s ORDER BY position",
-        (cycle["set_id"],),
-    ).fetchall()
-    completions = db.execute(
-        "SELECT puzzle_id, completed_at FROM cycle_completions WHERE cycle_id = %s",
-        (cycle_id,),
-    ).fetchall()
-    db.close()
 
     completed_map = {
         completion["puzzle_id"]: completion["completed_at"] for completion in completions
@@ -341,102 +353,303 @@ async def get_cycle(cycle_id: int):
 
 @app.post("/api/cycles/{cycle_id}/complete/{puzzle_id}")
 async def complete_puzzle(cycle_id: int, puzzle_id: str):
-    db = get_db()
-    cycle = db.execute(
-        "SELECT * FROM cycles WHERE id = %s",
-        (cycle_id,),
-    ).fetchone()
-    if not cycle:
-        db.close()
-        raise HTTPException(404, "Cycle not found")
-    if cycle["completed_at"] is not None:
-        db.close()
-        raise HTTPException(400, "Cycle already finished")
-    item = db.execute(
-        "SELECT 1 FROM puzzle_set_items WHERE set_id = %s AND puzzle_id = %s",
-        (cycle["set_id"], puzzle_id),
-    ).fetchone()
-    if not item:
-        db.close()
-        raise HTTPException(404, "Puzzle not in this set")
-    total = db.execute(
-        "SELECT COUNT(*) AS n FROM puzzle_set_items WHERE set_id = %s",
-        (cycle["set_id"],),
-    ).fetchone()["n"]
+    request_started_at = time.perf_counter()
+    phase = "request start"
+    db = None
+    set_id = None
 
-    db.execute(
-        """
-        INSERT INTO cycle_completions (cycle_id, puzzle_id, completed_at)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (cycle_id, puzzle_id) DO NOTHING
-        """,
-        (cycle_id, puzzle_id, time.time()),
+    def elapsed_ms() -> float:
+        return (time.perf_counter() - request_started_at) * 1000
+
+    logger.info(
+        "complete_puzzle started cycle_id=%s puzzle_id=%s",
+        cycle_id,
+        _truncate_for_log(puzzle_id),
     )
-    db.commit()
-    done_count = db.execute(
-        "SELECT COUNT(*) AS n FROM cycle_completions WHERE cycle_id = %s",
-        (cycle_id,),
-    ).fetchone()["n"]
-    db.close()
 
-    return {"ok": True, "all_done": done_count >= total}
+    try:
+        phase = "database connection"
+        db = get_db()
+        logger.info(
+            "complete_puzzle acquired database connection in %.1fms cycle_id=%s puzzle_id=%s",
+            elapsed_ms(),
+            cycle_id,
+            _truncate_for_log(puzzle_id),
+        )
+
+        phase = "cycle lookup"
+        cycle = db.execute(
+            "SELECT * FROM cycles WHERE id = %s",
+            (cycle_id,),
+        ).fetchone()
+        logger.info(
+            "complete_puzzle loaded cycle in %.1fms cycle_id=%s found=%s",
+            elapsed_ms(),
+            cycle_id,
+            bool(cycle),
+        )
+        if not cycle:
+            raise HTTPException(404, "Cycle not found")
+
+        phase = "cycle validation"
+        if cycle["completed_at"] is not None:
+            raise HTTPException(400, "Cycle already finished")
+        set_id = cycle["set_id"]
+        logger.info(
+            "complete_puzzle validated cycle state in %.1fms cycle_id=%s set_id=%s",
+            elapsed_ms(),
+            cycle_id,
+            set_id,
+        )
+
+        phase = "set membership lookup"
+        item = db.execute(
+            "SELECT 1 FROM puzzle_set_items WHERE set_id = %s AND puzzle_id = %s",
+            (set_id, puzzle_id),
+        ).fetchone()
+        logger.info(
+            "complete_puzzle verified puzzle membership in %.1fms cycle_id=%s set_id=%s puzzle_id=%s found=%s",
+            elapsed_ms(),
+            cycle_id,
+            set_id,
+            _truncate_for_log(puzzle_id),
+            bool(item),
+        )
+        if not item:
+            raise HTTPException(404, "Puzzle not in this set")
+
+        phase = "total puzzle count"
+        total = db.execute(
+            "SELECT COUNT(*) AS n FROM puzzle_set_items WHERE set_id = %s",
+            (set_id,),
+        ).fetchone()["n"]
+        logger.info(
+            "complete_puzzle counted total puzzles in %.1fms cycle_id=%s set_id=%s total=%s",
+            elapsed_ms(),
+            cycle_id,
+            set_id,
+            total,
+        )
+
+        phase = "completion insert"
+        db.execute(
+            """
+            INSERT INTO cycle_completions (cycle_id, puzzle_id, completed_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (cycle_id, puzzle_id) DO NOTHING
+            """,
+            (cycle_id, puzzle_id, time.time()),
+        )
+        logger.info(
+            "complete_puzzle inserted completion in %.1fms cycle_id=%s puzzle_id=%s",
+            elapsed_ms(),
+            cycle_id,
+            _truncate_for_log(puzzle_id),
+        )
+
+        phase = "commit"
+        db.commit()
+        logger.info(
+            "complete_puzzle committed transaction in %.1fms cycle_id=%s puzzle_id=%s",
+            elapsed_ms(),
+            cycle_id,
+            _truncate_for_log(puzzle_id),
+        )
+
+        phase = "completed count lookup"
+        done_count = db.execute(
+            "SELECT COUNT(*) AS n FROM cycle_completions WHERE cycle_id = %s",
+            (cycle_id,),
+        ).fetchone()["n"]
+        logger.info(
+            "complete_puzzle counted completed puzzles in %.1fms cycle_id=%s done=%s total=%s",
+            elapsed_ms(),
+            cycle_id,
+            done_count,
+            total,
+        )
+
+        all_done = done_count >= total
+        logger.info(
+            "complete_puzzle completed cycle_id=%s set_id=%s puzzle_id=%s all_done=%s total=%.1fms",
+            cycle_id,
+            set_id,
+            _truncate_for_log(puzzle_id),
+            all_done,
+            elapsed_ms(),
+        )
+        return {"ok": True, "all_done": all_done}
+    except HTTPException as exc:
+        logger.warning(
+            "complete_puzzle rejected during %s after %.1fms cycle_id=%s set_id=%s puzzle_id=%s status=%s detail=%s",
+            phase,
+            elapsed_ms(),
+            cycle_id,
+            set_id,
+            _truncate_for_log(puzzle_id),
+            exc.status_code,
+            exc.detail,
+        )
+        raise
+    except Exception:
+        logger.exception(
+            "complete_puzzle failed during %s after %.1fms cycle_id=%s set_id=%s puzzle_id=%s",
+            phase,
+            elapsed_ms(),
+            cycle_id,
+            set_id,
+            _truncate_for_log(puzzle_id),
+        )
+        raise
+    finally:
+        if db is not None:
+            db.close()
 
 
 @app.delete("/api/cycles/{cycle_id}/complete/{puzzle_id}")
 async def uncomplete_puzzle(cycle_id: int, puzzle_id: str):
-    db = get_db()
-    cycle = db.execute(
-        "SELECT * FROM cycles WHERE id = %s",
-        (cycle_id,),
-    ).fetchone()
-    if not cycle:
-        db.close()
-        raise HTTPException(404, "Cycle not found")
-    if cycle["completed_at"] is not None:
-        db.close()
-        raise HTTPException(400, "Cycle already finished")
-    db.execute(
-        "DELETE FROM cycle_completions WHERE cycle_id = %s AND puzzle_id = %s",
-        (cycle_id, puzzle_id),
+    request_started_at = time.perf_counter()
+    phase = "request start"
+    db = None
+    set_id = None
+
+    def elapsed_ms() -> float:
+        return (time.perf_counter() - request_started_at) * 1000
+
+    logger.info(
+        "uncomplete_puzzle started cycle_id=%s puzzle_id=%s",
+        cycle_id,
+        _truncate_for_log(puzzle_id),
     )
-    db.commit()
-    db.close()
-    return {"ok": True}
+
+    try:
+        phase = "database connection"
+        db = get_db()
+        logger.info(
+            "uncomplete_puzzle acquired database connection in %.1fms cycle_id=%s puzzle_id=%s",
+            elapsed_ms(),
+            cycle_id,
+            _truncate_for_log(puzzle_id),
+        )
+
+        phase = "cycle lookup"
+        cycle = db.execute(
+            "SELECT * FROM cycles WHERE id = %s",
+            (cycle_id,),
+        ).fetchone()
+        logger.info(
+            "uncomplete_puzzle loaded cycle in %.1fms cycle_id=%s found=%s",
+            elapsed_ms(),
+            cycle_id,
+            bool(cycle),
+        )
+        if not cycle:
+            raise HTTPException(404, "Cycle not found")
+
+        phase = "cycle validation"
+        if cycle["completed_at"] is not None:
+            raise HTTPException(400, "Cycle already finished")
+        set_id = cycle["set_id"]
+        logger.info(
+            "uncomplete_puzzle validated cycle state in %.1fms cycle_id=%s set_id=%s",
+            elapsed_ms(),
+            cycle_id,
+            set_id,
+        )
+
+        phase = "completion delete"
+        db.execute(
+            "DELETE FROM cycle_completions WHERE cycle_id = %s AND puzzle_id = %s",
+            (cycle_id, puzzle_id),
+        )
+        logger.info(
+            "uncomplete_puzzle deleted completion in %.1fms cycle_id=%s puzzle_id=%s",
+            elapsed_ms(),
+            cycle_id,
+            _truncate_for_log(puzzle_id),
+        )
+
+        phase = "commit"
+        db.commit()
+        logger.info(
+            "uncomplete_puzzle committed transaction in %.1fms cycle_id=%s puzzle_id=%s",
+            elapsed_ms(),
+            cycle_id,
+            _truncate_for_log(puzzle_id),
+        )
+
+        logger.info(
+            "uncomplete_puzzle completed cycle_id=%s set_id=%s puzzle_id=%s total=%.1fms",
+            cycle_id,
+            set_id,
+            _truncate_for_log(puzzle_id),
+            elapsed_ms(),
+        )
+        return {"ok": True}
+    except HTTPException as exc:
+        logger.warning(
+            "uncomplete_puzzle rejected during %s after %.1fms cycle_id=%s set_id=%s puzzle_id=%s status=%s detail=%s",
+            phase,
+            elapsed_ms(),
+            cycle_id,
+            set_id,
+            _truncate_for_log(puzzle_id),
+            exc.status_code,
+            exc.detail,
+        )
+        raise
+    except Exception:
+        logger.exception(
+            "uncomplete_puzzle failed during %s after %.1fms cycle_id=%s set_id=%s puzzle_id=%s",
+            phase,
+            elapsed_ms(),
+            cycle_id,
+            set_id,
+            _truncate_for_log(puzzle_id),
+        )
+        raise
+    finally:
+        if db is not None:
+            db.close()
 
 
 @app.patch("/api/cycles/{cycle_id}/finish")
 async def finish_cycle(cycle_id: int):
     db = get_db()
-    completed_count = db.execute(
-        "SELECT COUNT(*) AS n FROM cycle_completions WHERE cycle_id = %s",
-        (cycle_id,),
-    ).fetchone()["n"]
-    db.execute(
-        """
-        UPDATE cycles
-        SET completed_at = CURRENT_TIMESTAMP,
-            completed_count = %s
-        WHERE id = %s
-        """,
-        (completed_count, cycle_id),
-    )
-    db.commit()
-    db.close()
+    try:
+        completed_count = db.execute(
+            "SELECT COUNT(*) AS n FROM cycle_completions WHERE cycle_id = %s",
+            (cycle_id,),
+        ).fetchone()["n"]
+        db.execute(
+            """
+            UPDATE cycles
+            SET completed_at = CURRENT_TIMESTAMP,
+                completed_count = %s
+            WHERE id = %s
+            """,
+            (completed_count, cycle_id),
+        )
+        db.commit()
+    finally:
+        db.close()
     return {"ok": True, "completed_count": completed_count}
 
 
 @app.get("/api/sets/{set_id}/history")
 async def set_history(set_id: int):
     db = get_db()
-    cycles = db.execute(
-        "SELECT * FROM cycles WHERE set_id = %s ORDER BY cycle_number",
-        (set_id,),
-    ).fetchall()
-    total_puzzles = db.execute(
-        "SELECT COUNT(*) AS n FROM puzzle_set_items WHERE set_id = %s",
-        (set_id,),
-    ).fetchone()["n"]
-    db.close()
+    try:
+        cycles = db.execute(
+            "SELECT * FROM cycles WHERE set_id = %s ORDER BY cycle_number",
+            (set_id,),
+        ).fetchall()
+        total_puzzles = db.execute(
+            "SELECT COUNT(*) AS n FROM puzzle_set_items WHERE set_id = %s",
+            (set_id,),
+        ).fetchone()["n"]
+    finally:
+        db.close()
 
     result = []
     for cycle in cycles:
