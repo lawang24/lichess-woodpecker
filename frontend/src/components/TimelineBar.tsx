@@ -1,9 +1,16 @@
-import { computeTimeline, formatDate } from '../timeline.js'
+import { computeTimeline, formatDate } from '../timeline'
+import type { SetHistoryResponse } from '../types'
 
-export default function TimelineBar({ history }) {
+interface TimelineBarProps {
+  history: SetHistoryResponse
+}
+
+export default function TimelineBar({ history }: TimelineBarProps) {
   const timeline = computeTimeline(history.cycles)
 
-  if (timeline.state === 'not-started') return null
+  if (timeline.state === 'not-started') {
+    return null
+  }
 
   const finishColor = timeline.state === 'complete'
     ? 'var(--success)'
@@ -12,16 +19,18 @@ export default function TimelineBar({ history }) {
       : 'var(--text)'
 
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: 'repeat(3, 1fr)',
-      gap: 12,
-      background: 'var(--surface)',
-      borderRadius: 8,
-      padding: '12px 16px',
-      marginBottom: 12,
-      textAlign: 'center',
-    }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: 12,
+        background: 'var(--surface)',
+        borderRadius: 8,
+        padding: '12px 16px',
+        marginBottom: 12,
+        textAlign: 'center',
+      }}
+    >
       <div>
         <div style={{ fontSize: '0.95rem', fontWeight: 'bold' }}>
           {formatDate(timeline.startDate)}
@@ -35,11 +44,13 @@ export default function TimelineBar({ history }) {
         <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Current</div>
       </div>
       <div>
-        <div style={{
-          fontSize: '0.95rem',
-          fontWeight: 'bold',
-          color: finishColor,
-        }}>
+        <div
+          style={{
+            fontSize: '0.95rem',
+            fontWeight: 'bold',
+            color: finishColor,
+          }}
+        >
           {timeline.state === 'complete'
             ? formatDate(timeline.finishDate)
             : formatDate(timeline.projectedFinish)}

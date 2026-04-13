@@ -1,26 +1,52 @@
+import type { RefObject } from 'react'
 import { useMemo } from 'react'
 import { Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
   CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
   Filler,
   Legend,
+  LineElement,
+  LinearScale,
+  PointElement,
   Tooltip,
+  type ChartData,
+  type ChartOptions,
 } from 'chart.js'
-import { getScheduleForCycle } from '../schedule.js'
+import { getScheduleForCycle } from '../schedule'
+import type { CyclePuzzle, CycleRecord } from '../types'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Legend, Tooltip)
 
-function toDateStr(d) {
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+interface TrainingProps {
+  cycle: CycleRecord
+  puzzles: CyclePuzzle[]
+  onFinishCycle: () => void
+  onJumpToCurrent: () => void
 }
 
-export default function Training({ cycle, puzzles, onFinishCycle, onJumpToCurrent }) {
-  const chartData = useMemo(() => {
-    if (!cycle || puzzles.length === 0) return null
+interface TrainingPuzzleListProps {
+  cycle: CycleRecord
+  puzzles: CyclePuzzle[]
+  currentPuzzleRef: RefObject<HTMLLIElement | null>
+  onCompletePuzzle: (puzzleId: string) => void
+  onUncompletePuzzle: (puzzleId: string) => void
+}
+
+function toDateStr(date: Date): string {
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+export default function Training({
+  cycle,
+  puzzles,
+  onFinishCycle,
+  onJumpToCurrent,
+}: TrainingProps) {
+  const chartData = useMemo<ChartData<'line', (number | null)[], string> | null>(() => {
+    if (puzzles.length === 0) {
+      return null
+    }
 
     const total = puzzles.length
     const schedule = getScheduleForCycle(cycle.cycle_number)
@@ -30,38 +56,33 @@ export default function Training({ cycle, puzzles, onFinishCycle, onJumpToCurren
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
-    // Build day labels from cycle start to max(today, target end)
     const targetEnd = new Date(startDate)
     targetEnd.setDate(targetEnd.getDate() + schedule.days - 1)
     const endDate = today > targetEnd ? today : targetEnd
 
-    const days = []
-    const d = new Date(startDate)
-    while (d <= endDate) {
-      days.push(new Date(d))
-      d.setDate(d.getDate() + 1)
+    const days: Date[] = []
+    const cursor = new Date(startDate)
+    while (cursor <= endDate) {
+      days.push(new Date(cursor))
+      cursor.setDate(cursor.getDate() + 1)
     }
 
-    // Cumulative target: linear ramp to total over target days
     const dailyGoal = total / schedule.days
-    const targetLine = days.map((_, i) => Math.min(total, Math.round(dailyGoal * (i + 1))))
+    const targetLine = days.map((_, index) => Math.min(total, Math.round(dailyGoal * (index + 1))))
 
-    // Count completions per day
-    const completionsByDay = {}
-    for (const p of puzzles) {
-      if (p.completed_at) {
-        const cd = new Date(p.completed_at * 1000)
-        const key = `${cd.getFullYear()}-${cd.getMonth()}-${cd.getDate()}`
+    const completionsByDay: Record<string, number> = {}
+    for (const puzzle of puzzles) {
+      if (puzzle.completed_at) {
+        const completedDate = new Date(puzzle.completed_at * 1000)
+        const key = `${completedDate.getFullYear()}-${completedDate.getMonth()}-${completedDate.getDate()}`
         completionsByDay[key] = (completionsByDay[key] || 0) + 1
       }
     }
 
-    // Cumulative actual
     let cumulative = 0
     const actualLine = days.map(day => {
       const key = `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`
-      cumulative += (completionsByDay[key] || 0)
-      // Only plot up to today
+      cumulative += completionsByDay[key] || 0
       return day <= today ? cumulative : null
     })
 
@@ -91,25 +112,24 @@ export default function Training({ cycle, puzzles, onFinishCycle, onJumpToCurren
     }
   }, [cycle, puzzles])
 
-  if (!cycle) return null
-
-  const completed = puzzles.filter(p => p.completed).length
+  const completed = puzzles.filter(puzzle => puzzle.completed).length
   const total = puzzles.length
-  const hasCurrentPuzzle = puzzles.some(p => !p.completed)
+  const hasCurrentPuzzle = puzzles.some(puzzle => !puzzle.completed)
   const schedule = getScheduleForCycle(cycle.cycle_number)
   const dailyGoal = Math.ceil(total / schedule.days)
   const startDate = new Date(cycle.started_at)
-  const daysElapsed = Math.max(1, Math.floor((Date.now() - startDate) / 86400000) + 1)
+  const today = new Date()
+  const daysElapsed = Math.max(1, Math.floor((today.getTime() - startDate.getTime()) / 86400000) + 1)
   const daysRemaining = Math.max(0, schedule.days - daysElapsed)
   const allDone = completed === total && total > 0
 
-  const chartOptions = {
+  const chartOptions: ChartOptions<'line'> = {
     responsive: true,
     plugins: {
       legend: { labels: { color: '#999' } },
       tooltip: {
         callbacks: {
-          label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}`,
+          label: context => `${context.dataset.label ?? 'Value'}: ${context.parsed.y}`,
         },
       },
     },
@@ -192,12 +212,10 @@ export function TrainingPuzzleList({
   currentPuzzleRef,
   onCompletePuzzle,
   onUncompletePuzzle,
-}) {
-  if (!cycle) return null
-
+}: TrainingPuzzleListProps) {
   const schedule = getScheduleForCycle(cycle.cycle_number)
   const dailyGoal = Math.ceil(puzzles.length / schedule.days)
-  const firstUncompleted = puzzles.findIndex(p => !p.completed)
+  const firstUncompleted = puzzles.findIndex(puzzle => !puzzle.completed)
 
   return (
     <ul className="puzzle-list">
@@ -219,8 +237,12 @@ export function TrainingPuzzleList({
                 href={`https://lichess.org/training/${puzzle.puzzle_id}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={() => { if (!puzzle.completed) onCompletePuzzle(puzzle.puzzle_id) }}
-                onContextMenu={(event) => {
+                onClick={() => {
+                  if (!puzzle.completed) {
+                    onCompletePuzzle(puzzle.puzzle_id)
+                  }
+                }}
+                onContextMenu={event => {
                   if (puzzle.completed) {
                     event.preventDefault()
                     onUncompletePuzzle(puzzle.puzzle_id)

@@ -1,25 +1,29 @@
+import type { FormEvent } from 'react'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api.js'
-import { computeTimeline, formatDate } from '../timeline.js'
+import { api } from '../api'
+import { computeTimeline, formatDate } from '../timeline'
+import type { SetListItem } from '../types'
 
 export default function Home() {
-  const [sets, setSets] = useState([])
+  const [sets, setSets] = useState<SetListItem[]>([])
   const [name, setName] = useState('Woodpecker Set')
   const [count, setCount] = useState(50)
   const [rating, setRating] = useState(1500)
   const [creating, setCreating] = useState(false)
   const navigate = useNavigate()
 
-  useEffect(() => { loadSets() }, [])
+  useEffect(() => {
+    void loadSets()
+  }, [])
 
-  async function loadSets() {
-    const data = await api('/api/sets')
+  async function loadSets(): Promise<void> {
+    const data = await api<SetListItem[]>('/api/sets')
     setSets(data)
   }
 
-  async function createSet(e) {
-    e.preventDefault()
+  async function createSet(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
     setCreating(true)
     try {
       await api('/api/sets', {
@@ -27,14 +31,15 @@ export default function Home() {
         body: JSON.stringify({ name: name.trim() || 'Untitled', count, rating }),
       })
       await loadSets()
-    } catch (err) {
-      alert('Failed to create set: ' + err.message)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      alert(`Failed to create set: ${message}`)
     } finally {
       setCreating(false)
     }
   }
 
-  async function deleteSet(setId) {
+  async function deleteSet(setId: number): Promise<void> {
     if (!confirm('Delete this set and all its cycles?')) return
     await api(`/api/sets/${setId}`, { method: 'DELETE' })
     await loadSets()

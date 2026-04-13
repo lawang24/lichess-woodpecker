@@ -1,6 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
-import Home from './pages/Home.jsx'
-import SetDetail from './pages/SetDetail.jsx'
+import Home from './pages/Home'
+import SetDetail from './pages/SetDetail'
 
 export default function App() {
   return (
