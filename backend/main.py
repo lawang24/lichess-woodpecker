@@ -354,12 +354,20 @@ async def get_cycle(cycle_id: int):
 @app.post("/api/cycles/{cycle_id}/complete/{puzzle_id}")
 async def complete_puzzle(cycle_id: int, puzzle_id: str):
     request_started_at = time.perf_counter()
+    step_started_at = request_started_at
     phase = "request start"
     db = None
     set_id = None
 
     def elapsed_ms() -> float:
         return (time.perf_counter() - request_started_at) * 1000
+
+    def step_elapsed_ms() -> float:
+        nonlocal step_started_at
+        now = time.perf_counter()
+        elapsed = (now - step_started_at) * 1000
+        step_started_at = now
+        return elapsed
 
     logger.info(
         "complete_puzzle started cycle_id=%s puzzle_id=%s",
@@ -372,63 +380,9 @@ async def complete_puzzle(cycle_id: int, puzzle_id: str):
         db = get_db()
         logger.info(
             "complete_puzzle acquired database connection in %.1fms cycle_id=%s puzzle_id=%s",
-            elapsed_ms(),
+            step_elapsed_ms(),
             cycle_id,
             _truncate_for_log(puzzle_id),
-        )
-
-        phase = "cycle lookup"
-        cycle = db.execute(
-            "SELECT * FROM cycles WHERE id = %s",
-            (cycle_id,),
-        ).fetchone()
-        logger.info(
-            "complete_puzzle loaded cycle in %.1fms cycle_id=%s found=%s",
-            elapsed_ms(),
-            cycle_id,
-            bool(cycle),
-        )
-        if not cycle:
-            raise HTTPException(404, "Cycle not found")
-
-        phase = "cycle validation"
-        if cycle["completed_at"] is not None:
-            raise HTTPException(400, "Cycle already finished")
-        set_id = cycle["set_id"]
-        logger.info(
-            "complete_puzzle validated cycle state in %.1fms cycle_id=%s set_id=%s",
-            elapsed_ms(),
-            cycle_id,
-            set_id,
-        )
-
-        phase = "set membership lookup"
-        item = db.execute(
-            "SELECT 1 FROM puzzle_set_items WHERE set_id = %s AND puzzle_id = %s",
-            (set_id, puzzle_id),
-        ).fetchone()
-        logger.info(
-            "complete_puzzle verified puzzle membership in %.1fms cycle_id=%s set_id=%s puzzle_id=%s found=%s",
-            elapsed_ms(),
-            cycle_id,
-            set_id,
-            _truncate_for_log(puzzle_id),
-            bool(item),
-        )
-        if not item:
-            raise HTTPException(404, "Puzzle not in this set")
-
-        phase = "total puzzle count"
-        total = db.execute(
-            "SELECT COUNT(*) AS n FROM puzzle_set_items WHERE set_id = %s",
-            (set_id,),
-        ).fetchone()["n"]
-        logger.info(
-            "complete_puzzle counted total puzzles in %.1fms cycle_id=%s set_id=%s total=%s",
-            elapsed_ms(),
-            cycle_id,
-            set_id,
-            total,
         )
 
         phase = "completion insert"
@@ -442,7 +396,7 @@ async def complete_puzzle(cycle_id: int, puzzle_id: str):
         )
         logger.info(
             "complete_puzzle inserted completion in %.1fms cycle_id=%s puzzle_id=%s",
-            elapsed_ms(),
+            step_elapsed_ms(),
             cycle_id,
             _truncate_for_log(puzzle_id),
         )
@@ -451,34 +405,20 @@ async def complete_puzzle(cycle_id: int, puzzle_id: str):
         db.commit()
         logger.info(
             "complete_puzzle committed transaction in %.1fms cycle_id=%s puzzle_id=%s",
-            elapsed_ms(),
+            step_elapsed_ms(),
             cycle_id,
             _truncate_for_log(puzzle_id),
         )
 
-        phase = "completed count lookup"
-        done_count = db.execute(
-            "SELECT COUNT(*) AS n FROM cycle_completions WHERE cycle_id = %s",
-            (cycle_id,),
-        ).fetchone()["n"]
         logger.info(
-            "complete_puzzle counted completed puzzles in %.1fms cycle_id=%s done=%s total=%s",
-            elapsed_ms(),
-            cycle_id,
-            done_count,
-            total,
-        )
-
-        all_done = done_count >= total
-        logger.info(
-            "complete_puzzle completed cycle_id=%s set_id=%s puzzle_id=%s all_done=%s total=%.1fms",
+            "complete_puzzle completed cycle_id=%s set_id=%s puzzle_id=%s total=%.1fms",
             cycle_id,
             set_id,
             _truncate_for_log(puzzle_id),
-            all_done,
             elapsed_ms(),
         )
-        return {"ok": True, "all_done": all_done}
+        return {"ok": True}
+        
     except HTTPException as exc:
         logger.warning(
             "complete_puzzle rejected during %s after %.1fms cycle_id=%s set_id=%s puzzle_id=%s status=%s detail=%s",
@@ -509,12 +449,20 @@ async def complete_puzzle(cycle_id: int, puzzle_id: str):
 @app.delete("/api/cycles/{cycle_id}/complete/{puzzle_id}")
 async def uncomplete_puzzle(cycle_id: int, puzzle_id: str):
     request_started_at = time.perf_counter()
+    step_started_at = request_started_at
     phase = "request start"
     db = None
     set_id = None
 
     def elapsed_ms() -> float:
         return (time.perf_counter() - request_started_at) * 1000
+
+    def step_elapsed_ms() -> float:
+        nonlocal step_started_at
+        now = time.perf_counter()
+        elapsed = (now - step_started_at) * 1000
+        step_started_at = now
+        return elapsed
 
     logger.info(
         "uncomplete_puzzle started cycle_id=%s puzzle_id=%s",
@@ -527,7 +475,7 @@ async def uncomplete_puzzle(cycle_id: int, puzzle_id: str):
         db = get_db()
         logger.info(
             "uncomplete_puzzle acquired database connection in %.1fms cycle_id=%s puzzle_id=%s",
-            elapsed_ms(),
+            step_elapsed_ms(),
             cycle_id,
             _truncate_for_log(puzzle_id),
         )
@@ -539,7 +487,7 @@ async def uncomplete_puzzle(cycle_id: int, puzzle_id: str):
         ).fetchone()
         logger.info(
             "uncomplete_puzzle loaded cycle in %.1fms cycle_id=%s found=%s",
-            elapsed_ms(),
+            step_elapsed_ms(),
             cycle_id,
             bool(cycle),
         )
@@ -552,7 +500,7 @@ async def uncomplete_puzzle(cycle_id: int, puzzle_id: str):
         set_id = cycle["set_id"]
         logger.info(
             "uncomplete_puzzle validated cycle state in %.1fms cycle_id=%s set_id=%s",
-            elapsed_ms(),
+            step_elapsed_ms(),
             cycle_id,
             set_id,
         )
@@ -564,7 +512,7 @@ async def uncomplete_puzzle(cycle_id: int, puzzle_id: str):
         )
         logger.info(
             "uncomplete_puzzle deleted completion in %.1fms cycle_id=%s puzzle_id=%s",
-            elapsed_ms(),
+            step_elapsed_ms(),
             cycle_id,
             _truncate_for_log(puzzle_id),
         )
@@ -573,7 +521,7 @@ async def uncomplete_puzzle(cycle_id: int, puzzle_id: str):
         db.commit()
         logger.info(
             "uncomplete_puzzle committed transaction in %.1fms cycle_id=%s puzzle_id=%s",
-            elapsed_ms(),
+            step_elapsed_ms(),
             cycle_id,
             _truncate_for_log(puzzle_id),
         )
@@ -707,9 +655,10 @@ async def serve_spa(full_path: str, request: Request):
 if __name__ == "__main__":
     import uvicorn
 
+    reload_enabled = os.environ.get("UVICORN_RELOAD") == "1"
     uvicorn.run(
-        app,
+        "main:app" if reload_enabled else app,
         host="0.0.0.0",
         port=int(os.environ.get("PORT", "8000")),
-        reload=os.environ.get("UVICORN_RELOAD") == "1",
+        reload=reload_enabled,
     )

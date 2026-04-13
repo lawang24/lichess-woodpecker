@@ -31,11 +31,15 @@ function toISO(date: Date): string {
 
 export default function RatingChart({ startDate, endDate }: RatingChartProps) {
   const [ratings, setRatings] = useState<RatingPoint[] | null>(null)
+  const startDateMs = startDate.getTime()
+  const endDateMs = endDate.getTime()
+  const startDateIso = toISO(startDate)
+  const endDateIso = toISO(endDate)
 
   useEffect(() => {
     let cancelled = false
 
-    void api<RatingsResponse>(`/api/ratings?start_date=${toISO(startDate)}&end_date=${toISO(endDate)}`)
+    void api<RatingsResponse>(`/api/ratings?start_date=${startDateIso}&end_date=${endDateIso}`)
       .then(data => {
         if (!cancelled) {
           setRatings(data.ratings)
@@ -50,7 +54,7 @@ export default function RatingChart({ startDate, endDate }: RatingChartProps) {
     return () => {
       cancelled = true
     }
-  }, [startDate, endDate])
+  }, [startDateIso, endDateIso, startDateMs, endDateMs])
 
   const chartData = useMemo<{
     center: number
@@ -106,7 +110,7 @@ export default function RatingChart({ startDate, endDate }: RatingChartProps) {
         ],
       },
     }
-  }, [ratings, startDate, endDate])
+  }, [ratings, startDateMs, endDateMs])
 
   const chartOptions: ChartOptions<'line'> = {
     responsive: true,

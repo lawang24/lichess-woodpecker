@@ -35,6 +35,7 @@ cd backend && .venv/bin/python build_puzzle_catalog.py && cd ..
 ```
 
 The app runs at `http://localhost:5173` (frontend) with the API at `http://localhost:8000`.
+`./dev.sh` enables FastAPI hot reload for the backend by default. Set `UVICORN_RELOAD=0` if you need to disable it.
 Puzzle sampling uses memory-mapped NumPy arrays built from `backend/data/puzzles.csv.zst`, so build the compact catalog before creating sets.
 
 For production, build the frontend (`npm run build` in `frontend/`) and the backend serves it directly from `backend/static/`.

@@ -9,6 +9,7 @@ import TimelineBar from '../components/TimelineBar'
 import Training, { TrainingPuzzleList } from '../components/Training'
 import type {
   CycleDetailResponse,
+  CyclePuzzle,
   CycleRecord,
   PuzzleSet,
   SetHistoryResponse,
@@ -54,6 +55,10 @@ interface PuzzleListSectionProps {
   currentPuzzleRef: RefObject<HTMLLIElement | null>
   onCompletePuzzle: (puzzleId: string) => void
   onUncompletePuzzle: (puzzleId: string) => void
+}
+
+function getPendingPuzzleKey(cycleId: number, puzzleId: string): string {
+  return `${cycleId}:${puzzleId}`
 }
 
 function findCurrentCycle(cycles: readonly CurrentCycleSummary[]): CurrentCycleSummary | null {
@@ -166,6 +171,65 @@ export default function SetDetail() {
   const [currentCycleDetails, setCurrentCycleDetails] = useState<CycleDetailResponse | null>(null)
   const currentPuzzleRef = useRef<HTMLLIElement | null>(null)
   const latestCycleIdRef = useRef<number | null>(null)
+  const pendingPuzzleKeysRef = useRef<Set<string>>(new Set())
+
+  const applyCurrentCycleDetails = useCallback(
+    (
+      next:
+        | CycleDetailResponse
+        | null
+        | ((prev: CycleDetailResponse | null) => CycleDetailResponse | null),
+    ): void => {
+      setCurrentCycleDetails(next)
+    },
+    [],
+  )
+
+  const updatePuzzleInCurrentCycle = useCallback(
+    (
+      cycleId: number,
+      puzzleId: string,
+      updater: (puzzle: CyclePuzzle) => CyclePuzzle,
+    ): CyclePuzzle | null => {
+      if (!currentCycleDetails || currentCycleDetails.cycle.id !== cycleId) {
+        return null
+      }
+
+      const existingPuzzle = currentCycleDetails.puzzles.find(puzzle => puzzle.puzzle_id === puzzleId) ?? null
+
+      if (!existingPuzzle) {
+        return null
+      }
+
+      applyCurrentCycleDetails(prev => {
+        if (!prev || prev.cycle.id !== cycleId) {
+          return prev
+        }
+
+        let didUpdate = false
+        const puzzles = prev.puzzles.map(puzzle => {
+          if (puzzle.puzzle_id !== puzzleId) {
+            return puzzle
+          }
+
+          didUpdate = true
+          return updater(puzzle)
+        })
+
+        if (!didUpdate) {
+          return prev
+        }
+
+        return {
+          ...prev,
+          puzzles,
+        }
+      })
+
+      return existingPuzzle
+    },
+    [applyCurrentCycleDetails, currentCycleDetails],
+  )
 
   const fetchSetDetailData = useCallback(async (): Promise<{
     overviewResponse: SetOverviewResponse
@@ -207,7 +271,7 @@ export default function SetDetail() {
         setSetOverview(data.overviewResponse)
         setSetHistory(data.historyResponse)
         setCurrentCycle(data.nextCurrentCycle)
-        setCurrentCycleDetails(data.cycleDetails)
+        applyCurrentCycleDetails(data.cycleDetails)
       })
       .catch(error => {
         if (!cancelled) {
@@ -218,7 +282,7 @@ export default function SetDetail() {
     return () => {
       cancelled = true
     }
-  }, [fetchSetDetailData])
+  }, [applyCurrentCycleDetails, fetchSetDetailData])
 
   async function refreshSetDetail(): Promise<void> {
     const data = await fetchSetDetailData()
@@ -226,7 +290,7 @@ export default function SetDetail() {
     setSetOverview(data.overviewResponse)
     setSetHistory(data.historyResponse)
     setCurrentCycle(data.nextCurrentCycle)
-    setCurrentCycleDetails(data.cycleDetails)
+    applyCurrentCycleDetails(data.cycleDetails)
   }
 
   async function refreshCurrentCycleDetails(
@@ -237,7 +301,7 @@ export default function SetDetail() {
     }
 
     const cycleDetails = await api<CycleDetailResponse>(`/api/cycles/${cycleId}`)
-    setCurrentCycleDetails(prev => (latestCycleIdRef.current === cycleId ? cycleDetails : prev))
+    applyCurrentCycleDetails(prev => (latestCycleIdRef.current === cycleId ? cycleDetails : prev))
   }
 
   async function startCycle(): Promise<void> {
@@ -283,8 +347,32 @@ export default function SetDetail() {
       return
     }
 
-    await api(`/api/cycles/${currentCycle.id}/complete/${puzzleId}`, { method: 'POST' })
-    await refreshCurrentCycleDetails()
+    const cycleId = currentCycle.id
+    const pendingPuzzleKey = getPendingPuzzleKey(cycleId, puzzleId)
+    if (pendingPuzzleKeysRef.current.has(pendingPuzzleKey)) {
+      return
+    }
+
+    const previousPuzzle = updatePuzzleInCurrentCycle(cycleId, puzzleId, puzzle => ({
+      ...puzzle,
+      completed: true,
+      completed_at: Date.now() / 1000,
+    }))
+
+    if (!previousPuzzle || previousPuzzle.completed) {
+      return
+    }
+
+    pendingPuzzleKeysRef.current.add(pendingPuzzleKey)
+
+    try {
+      await api(`/api/cycles/${cycleId}/complete/${puzzleId}`, { method: 'POST' })
+    } catch (error) {
+      updatePuzzleInCurrentCycle(cycleId, puzzleId, () => previousPuzzle)
+      throw error
+    } finally {
+      pendingPuzzleKeysRef.current.delete(pendingPuzzleKey)
+    }
   }
 
   async function uncompletePuzzle(puzzleId: string): Promise<void> {
@@ -292,8 +380,32 @@ export default function SetDetail() {
       return
     }
 
-    await api(`/api/cycles/${currentCycle.id}/complete/${puzzleId}`, { method: 'DELETE' })
-    await refreshCurrentCycleDetails()
+    const cycleId = currentCycle.id
+    const pendingPuzzleKey = getPendingPuzzleKey(cycleId, puzzleId)
+    if (pendingPuzzleKeysRef.current.has(pendingPuzzleKey)) {
+      return
+    }
+
+    const previousPuzzle = updatePuzzleInCurrentCycle(cycleId, puzzleId, puzzle => ({
+      ...puzzle,
+      completed: false,
+      completed_at: null,
+    }))
+
+    if (!previousPuzzle || !previousPuzzle.completed) {
+      return
+    }
+
+    pendingPuzzleKeysRef.current.add(pendingPuzzleKey)
+
+    try {
+      await api(`/api/cycles/${cycleId}/complete/${puzzleId}`, { method: 'DELETE' })
+    } catch (error) {
+      updatePuzzleInCurrentCycle(cycleId, puzzleId, () => previousPuzzle)
+      throw error
+    } finally {
+      pendingPuzzleKeysRef.current.delete(pendingPuzzleKey)
+    }
   }
 
   function jumpToCurrentPuzzle(): void {
