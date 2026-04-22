@@ -80,6 +80,43 @@ input, select {
 
 .form-row label { min-width: 60px; color: var(--text-dim); font-size: 0.85rem; }
 
+.auth-card {
+  display: grid;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.auth-eyebrow {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-title {
+  color: var(--text);
+  margin-bottom: 0;
+}
+
+.auth-copy {
+  color: var(--text-dim);
+}
+
+.auth-button {
+  justify-self: start;
+}
+
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-identity {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
 /* Puzzle list */
 .puzzle-list { list-style: none; width: 100%; }
 
@@ -200,6 +237,7 @@ li:has(+ li > .day-separator) .puzzle-item {
   body { padding: 12px; }
 
   .header { flex-wrap: wrap; gap: 8px; }
+  .auth-status { width: 100%; justify-content: space-between; }
 
   .card-row {
     flex-direction: column;

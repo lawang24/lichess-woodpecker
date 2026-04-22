@@ -4,7 +4,6 @@ import { useParams, Link } from 'react-router-dom'
 import { api } from '../api'
 import { computeTimeline } from '../timeline'
 import Dashboard from '../components/Dashboard'
-import RatingChart from '../components/RatingChart'
 import TimelineBar from '../components/TimelineBar'
 import Training, { TrainingPuzzleList } from '../components/Training'
 import type {
@@ -18,11 +17,6 @@ import type {
 } from '../types'
 
 type CurrentCycleSummary = Pick<CycleRecord, 'id' | 'cycle_number' | 'completed_at'>
-
-interface RatingHistoryWindow {
-  startDate: Date
-  endDate: Date
-}
 
 interface SetDetailsSectionProps {
   setInfo: PuzzleSet
@@ -42,10 +36,6 @@ interface ActiveCycleSectionProps {
   onJumpToCurrentPuzzle: () => void
 }
 
-interface RatingChartSectionProps {
-  history: SetHistoryResponse
-}
-
 interface CompletedCycleInformationSectionProps {
   history: SetHistoryResponse
 }
@@ -63,21 +53,6 @@ function getPendingPuzzleKey(cycleId: number, puzzleId: string): string {
 
 function findCurrentCycle(cycles: readonly CurrentCycleSummary[]): CurrentCycleSummary | null {
   return cycles.find(cycle => cycle.completed_at === null) ?? null
-}
-
-function getRatingHistoryWindow(cycles: readonly CycleRecord[]): RatingHistoryWindow | null {
-  const timeline = computeTimeline(cycles)
-
-  if (timeline.state === 'not-started') {
-    return null
-  }
-
-  return {
-    startDate: timeline.startDate,
-    endDate: timeline.state === 'complete'
-      ? timeline.finishDate
-      : timeline.projectedFinish,
-  }
 }
 
 function SetDetailsSection({ setInfo, puzzleCount, onReset }: SetDetailsSectionProps) {
@@ -126,16 +101,6 @@ function ActiveCycleSection({
       onJumpToCurrent={onJumpToCurrentPuzzle}
     />
   )
-}
-
-function RatingChartSection({ history }: RatingChartSectionProps) {
-  const ratingHistoryWindow = getRatingHistoryWindow(history.cycles)
-
-  if (!ratingHistoryWindow) {
-    return null
-  }
-
-  return <RatingChart {...ratingHistoryWindow} />
 }
 
 function CompletedCycleInformationSection({ history }: CompletedCycleInformationSectionProps) {
@@ -434,8 +399,6 @@ export default function SetDetail() {
       />
 
       <CompletedCycleInformationSection history={setHistory} />
-
-      <RatingChartSection history={setHistory} />
 
       <PuzzleListSection
         currentCycleDetails={currentCycleDetails}

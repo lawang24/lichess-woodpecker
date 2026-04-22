@@ -15,8 +15,8 @@ ENV_PATHS = (
     PROJECT_ROOT / ".env.local",
 )
 ORIGINAL_ENV_KEYS = set(os.environ)
-DB_POOL_MIN_SIZE = 1
-DB_POOL_MAX_SIZE = 1
+DB_POOL_MIN_SIZE = int(os.environ.get("DB_POOL_MIN_SIZE", "1"))
+DB_POOL_MAX_SIZE = max(DB_POOL_MIN_SIZE, int(os.environ.get("DB_POOL_MAX_SIZE", "5")))
 _db_pool: ConnectionPool | None = None
 
 

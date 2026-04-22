@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Chess puzzle training with spaced repetition"
 requires-python = ">=3.14"
 dependencies = [
+    "authlib>=1.6.5",
     "fastapi>=0.135.2",
     "httpx>=0.28.1",
     "itsdangerous>=2.2.0",

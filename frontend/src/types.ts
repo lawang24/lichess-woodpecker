@@ -1,3 +1,10 @@
+export interface User {
+  id: number
+  provider: string
+  provider_user_id: string
+  provider_username: string
+}
+
 export interface PuzzleSet {
   id: number
   name: string
@@ -54,15 +61,6 @@ export interface CycleDetailResponse {
 export interface StartCycleResponse {
   id: number
   cycle_number: number
-}
-
-export interface RatingPoint {
-  date: string
-  rating: number
-}
-
-export interface RatingsResponse {
-  ratings: RatingPoint[]
 }
 
 export interface ScheduleEntry {

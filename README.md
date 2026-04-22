@@ -16,11 +16,16 @@ Tracks cycle history (completion count, duration) and Chess.com rating over time
 
 **Prerequisites:** Python 3.14+, Node 18+, PostgreSQL 16+, [uv](https://github.com/astral-sh/uv)
 
-Add a Postgres connection string in `.env` before starting the backend:
+Add the required backend settings in `.env` before starting:
 
 ```bash
 DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:5432/postgres
+LICHESS_CLIENT_ID=<optional; defaults to chess-woodpecker-local in dev.sh>
+# In local dev this should be your frontend origin, e.g. http://localhost:5173
+APP_BASE_URL=http://localhost:5173
 ```
+
+`dev.sh` will default `APP_BASE_URL` to `http://localhost:5173`, `SESSION_SECRET` to `dev-session-secret`, and `LICHESS_CLIENT_ID` to `chess-woodpecker-local`. In production, set `SESSION_SECRET` explicitly and choose a stable `LICHESS_CLIENT_ID` for your deployment.
 
 ```bash
 # Install dependencies

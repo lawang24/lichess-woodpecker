@@ -1,25 +1,35 @@
+import logging
 import os
 import time
-import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 try:
+    from . import auth as auth_module
     from .database import close_db, get_db, init_db
     from .puzzle_catalog import CatalogNotBuiltError, PuzzleCatalog
 except ImportError:
+    import auth as auth_module
     from database import close_db, get_db, init_db
     from puzzle_catalog import CatalogNotBuiltError, PuzzleCatalog
 
 BACKEND_DIR = os.path.abspath(os.path.dirname(__file__))
 FRONTEND_DIST = os.path.join(BACKEND_DIR, "static")
 FRONTEND_DEV_URL = os.environ.get("FRONTEND_DEV_URL", "").rstrip("/")
-TIMESTAMP_FIELDS = {"created_at", "started_at", "completed_at"}
+TIMESTAMP_FIELDS = {
+    "created_at",
+    "started_at",
+    "completed_at",
+    "expires_at",
+    "last_seen_at",
+    "revoked_at",
+}
 logger = logging.getLogger("uvicorn.error")
+_puzzle_catalog = None
 
 
 def _as_utc_datetime(value):
@@ -35,12 +45,12 @@ def _as_utc_datetime(value):
 
 
 def _utc_dict(row) -> dict:
-    d = dict(row)
+    data = dict(row)
     for key in TIMESTAMP_FIELDS:
-        value = d.get(key)
+        value = data.get(key)
         if value is not None:
-            d[key] = _as_utc_datetime(value).isoformat().replace("+00:00", "Z")
-    return d
+            data[key] = _as_utc_datetime(value).isoformat().replace("+00:00", "Z")
+    return data
 
 
 def _resolve_frontend_file(full_path: str) -> str | None:
@@ -59,8 +69,47 @@ def _truncate_for_log(value: str, limit: int = 80) -> str:
     return f"{value[: limit - 3]}..."
 
 
+def _get_puzzle_catalog() -> PuzzleCatalog:
+    global _puzzle_catalog
+
+    if _puzzle_catalog is None:
+        _puzzle_catalog = PuzzleCatalog.load()
+
+    return _puzzle_catalog
+
+
+def _load_owned_set(db, set_id: int, user_id: int):
+    puzzle_set = db.execute(
+        """
+        SELECT *
+        FROM puzzle_sets
+        WHERE id = %s AND user_id = %s
+        """,
+        (set_id, user_id),
+    ).fetchone()
+    if not puzzle_set:
+        raise HTTPException(404, "Set not found")
+    return puzzle_set
+
+
+def _load_owned_cycle(db, cycle_id: int, user_id: int):
+    cycle = db.execute(
+        """
+        SELECT c.*
+        FROM cycles c
+        JOIN puzzle_sets s ON s.id = c.set_id
+        WHERE c.id = %s AND s.user_id = %s
+        """,
+        (cycle_id, user_id),
+    ).fetchone()
+    if not cycle:
+        raise HTTPException(404, "Cycle not found")
+    return cycle
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    auth_module.validate_auth_configuration()
     init_db()
     try:
         yield
@@ -78,8 +127,65 @@ if not FRONTEND_DEV_URL and os.path.isdir(FRONTEND_DIST):
     )
 
 
+@app.get("/api/auth/{provider}/start")
+async def auth_start(provider: str, request: Request):
+    authorization_url, flow_payload = auth_module.build_authorization_url(provider, request)
+    response = RedirectResponse(authorization_url, status_code=302)
+    auth_module.set_auth_flow_cookie(response, request, flow_payload)
+    return response
+
+
+@app.get("/api/auth/{provider}/callback")
+async def auth_callback(provider: str, request: Request):
+    auth_module.get_provider(provider)
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    if not code or not state:
+        raise HTTPException(400, "Missing OAuth callback parameters")
+
+    flow = auth_module.read_auth_flow(request, provider)
+    if flow.get("state") != state:
+        raise HTTPException(400, "Invalid OAuth state")
+
+    redirect_uri = auth_module.get_redirect_uri(request, provider)
+    access_token = await auth_module.exchange_code_for_token(
+        code,
+        flow["code_verifier"],
+        redirect_uri,
+        request,
+    )
+    if provider != auth_module.LICHESS_PROVIDER:
+        raise HTTPException(404, "Provider not found")
+
+    account = await auth_module.fetch_lichess_account(access_token)
+    user = auth_module.upsert_user(
+        provider=provider,
+        provider_user_id=account["id"],
+        provider_username=account["username"],
+    )
+    session_token = auth_module.create_session(user["id"])
+
+    response = RedirectResponse("/", status_code=302)
+    auth_module.clear_auth_flow_cookie(response)
+    auth_module.set_session_cookie(response, request, session_token)
+    return response
+
+
+@app.get("/api/me")
+async def get_me(current_user=Depends(auth_module.require_current_user)):
+    return {"user": _utc_dict(current_user)}
+
+
+@app.post("/api/logout")
+async def logout(request: Request):
+    auth_module.revoke_session(request.cookies.get(auth_module.SESSION_COOKIE_NAME))
+    response = JSONResponse({"ok": True})
+    auth_module.clear_session_cookie(response)
+    return response
+
+
 @app.get("/api/sets")
-async def list_sets():
+async def list_sets(current_user=Depends(auth_module.require_current_user)):
     db = get_db()
     try:
         sets = db.execute(
@@ -92,16 +198,21 @@ async def list_sets():
                 COUNT(i.id) AS puzzle_count
             FROM puzzle_sets s
             LEFT JOIN puzzle_set_items i ON i.set_id = s.id
+            WHERE s.user_id = %s
             GROUP BY s.id, s.name, s.target_rating, s.created_at
             ORDER BY s.created_at DESC
-            """
+            """,
+            (current_user["id"],),
         ).fetchall()
         cycles = db.execute(
             """
-            SELECT id, set_id, cycle_number, started_at, completed_at
-            FROM cycles
-            ORDER BY cycle_number
-            """
+            SELECT c.id, c.set_id, c.cycle_number, c.started_at, c.completed_at
+            FROM cycles c
+            JOIN puzzle_sets s ON s.id = c.set_id
+            WHERE s.user_id = %s
+            ORDER BY c.cycle_number
+            """,
+            (current_user["id"],),
         ).fetchall()
     finally:
         db.close()
@@ -120,15 +231,10 @@ async def list_sets():
 
 
 @app.get("/api/sets/{set_id}")
-async def get_set(set_id: int):
+async def get_set(set_id: int, current_user=Depends(auth_module.require_current_user)):
     db = get_db()
     try:
-        puzzle_set = db.execute(
-            "SELECT * FROM puzzle_sets WHERE id = %s",
-            (set_id,),
-        ).fetchone()
-        if not puzzle_set:
-            raise HTTPException(404, "Set not found")
+        puzzle_set = _load_owned_set(db, set_id, current_user["id"])
         items = db.execute(
             "SELECT * FROM puzzle_set_items WHERE set_id = %s ORDER BY position",
             (set_id,),
@@ -138,20 +244,11 @@ async def get_set(set_id: int):
     return {"set": _utc_dict(puzzle_set), "puzzles": [dict(item) for item in items]}
 
 
-_puzzle_catalog = None
-
-
-def _get_puzzle_catalog() -> PuzzleCatalog:
-    global _puzzle_catalog
-
-    if _puzzle_catalog is None:
-        _puzzle_catalog = PuzzleCatalog.load()
-
-    return _puzzle_catalog
-
-
 @app.post("/api/sets")
-async def create_set(request: Request):
+async def create_set(
+    request: Request,
+    current_user=Depends(auth_module.require_current_user),
+):
     request_started_at = time.perf_counter()
     phase = "request start"
     db = None
@@ -170,51 +267,37 @@ async def create_set(request: Request):
         rating = body.get("rating")
         target_rating = int(rating) if rating is not None else None
         logger.info(
-            "create_set started name=%r count=%s rating=%s",
+            "create_set started name=%r count=%s rating=%s user_id=%s",
             _truncate_for_log(name),
             count,
             target_rating,
+            current_user["id"],
         )
-        logger.info("create_set parsed request in %.1fms", elapsed_ms())
 
         phase = "puzzle catalog load"
         try:
             catalog = _get_puzzle_catalog()
         except CatalogNotBuiltError as exc:
-            logger.error(
-                "create_set failed during %s after %.1fms name=%r count=%s rating=%s: %s",
-                phase,
-                elapsed_ms(),
-                _truncate_for_log(name),
-                count,
-                target_rating,
-                exc,
-            )
             raise HTTPException(503, str(exc)) from exc
-        logger.info("create_set loaded puzzle catalog in %.1fms", elapsed_ms())
 
         phase = "puzzle sampling"
         if target_rating is not None:
             sample = catalog.sample_by_rating(count, target_rating)
         else:
             sample = catalog.sample_random(count)
-        logger.info(
-            "create_set sampled puzzles in %.1fms requested=%s actual=%s",
-            elapsed_ms(),
-            count,
-            len(sample),
-        )
 
         phase = "database connection"
         db = get_db()
-        logger.info("create_set acquired database connection in %.1fms", elapsed_ms())
 
         phase = "set insert"
         set_id = db.execute(
-            "INSERT INTO puzzle_sets (name, target_rating) VALUES (%s, %s) RETURNING id",
-            (name, target_rating),
+            """
+            INSERT INTO puzzle_sets (user_id, name, target_rating)
+            VALUES (%s, %s, %s)
+            RETURNING id
+            """,
+            (current_user["id"], name, target_rating),
         ).fetchone()["id"]
-        logger.info("create_set inserted puzzle set id=%s in %.1fms", set_id, elapsed_ms())
 
         phase = "set item bulk insert"
         if sample:
@@ -229,19 +312,13 @@ async def create_set(request: Request):
                 """,
                 params,
             )
-        logger.info(
-            "create_set bulk inserted %s puzzle_set_items in %.1fms",
-            len(sample),
-            elapsed_ms(),
-        )
 
         phase = "commit"
         db.commit()
-        logger.info("create_set committed transaction in %.1fms", elapsed_ms())
-
         logger.info(
-            "create_set completed id=%s name=%r requested=%s actual=%s total=%.1fms",
+            "create_set completed id=%s user_id=%s name=%r requested=%s actual=%s total=%.1fms",
             set_id,
+            current_user["id"],
             _truncate_for_log(name),
             count,
             len(sample),
@@ -252,12 +329,13 @@ async def create_set(request: Request):
         raise
     except Exception:
         logger.exception(
-            "create_set failed during %s after %.1fms name=%r count=%s rating=%s",
+            "create_set failed during %s after %.1fms name=%r count=%s rating=%s user_id=%s",
             phase,
             elapsed_ms(),
             _truncate_for_log(name),
             count,
             target_rating,
+            current_user["id"],
         )
         raise
     finally:
@@ -266,10 +344,19 @@ async def create_set(request: Request):
 
 
 @app.delete("/api/sets/{set_id}")
-async def delete_set(set_id: int):
+async def delete_set(set_id: int, current_user=Depends(auth_module.require_current_user)):
     db = get_db()
     try:
-        db.execute("DELETE FROM puzzle_sets WHERE id = %s", (set_id,))
+        deleted = db.execute(
+            """
+            DELETE FROM puzzle_sets
+            WHERE id = %s AND user_id = %s
+            RETURNING id
+            """,
+            (set_id, current_user["id"]),
+        ).fetchone()
+        if not deleted:
+            raise HTTPException(404, "Set not found")
         db.commit()
     finally:
         db.close()
@@ -277,9 +364,10 @@ async def delete_set(set_id: int):
 
 
 @app.post("/api/sets/{set_id}/reset")
-async def reset_set(set_id: int):
+async def reset_set(set_id: int, current_user=Depends(auth_module.require_current_user)):
     db = get_db()
     try:
+        _load_owned_set(db, set_id, current_user["id"])
         db.execute("DELETE FROM cycles WHERE set_id = %s", (set_id,))
         db.commit()
     finally:
@@ -288,15 +376,10 @@ async def reset_set(set_id: int):
 
 
 @app.post("/api/sets/{set_id}/cycles")
-async def start_cycle(set_id: int):
+async def start_cycle(set_id: int, current_user=Depends(auth_module.require_current_user)):
     db = get_db()
     try:
-        puzzle_set = db.execute(
-            "SELECT * FROM puzzle_sets WHERE id = %s",
-            (set_id,),
-        ).fetchone()
-        if not puzzle_set:
-            raise HTTPException(404, "Set not found")
+        _load_owned_set(db, set_id, current_user["id"])
         last_cycle = db.execute(
             "SELECT MAX(cycle_number) AS n FROM cycles WHERE set_id = %s",
             (set_id,),
@@ -317,15 +400,10 @@ async def start_cycle(set_id: int):
 
 
 @app.get("/api/cycles/{cycle_id}")
-async def get_cycle(cycle_id: int):
+async def get_cycle(cycle_id: int, current_user=Depends(auth_module.require_current_user)):
     db = get_db()
     try:
-        cycle = db.execute(
-            "SELECT * FROM cycles WHERE id = %s",
-            (cycle_id,),
-        ).fetchone()
-        if not cycle:
-            raise HTTPException(404, "Cycle not found")
+        cycle = _load_owned_cycle(db, cycle_id, current_user["id"])
         cycle = _utc_dict(cycle)
         items = db.execute(
             "SELECT * FROM puzzle_set_items WHERE set_id = %s ORDER BY position",
@@ -352,9 +430,12 @@ async def get_cycle(cycle_id: int):
 
 
 @app.post("/api/cycles/{cycle_id}/complete/{puzzle_id}")
-async def complete_puzzle(cycle_id: int, puzzle_id: str):
+async def complete_puzzle(
+    cycle_id: int,
+    puzzle_id: str,
+    current_user=Depends(auth_module.require_current_user),
+):
     request_started_at = time.perf_counter()
-    step_started_at = request_started_at
     phase = "request start"
     db = None
     set_id = None
@@ -362,28 +443,22 @@ async def complete_puzzle(cycle_id: int, puzzle_id: str):
     def elapsed_ms() -> float:
         return (time.perf_counter() - request_started_at) * 1000
 
-    def step_elapsed_ms() -> float:
-        nonlocal step_started_at
-        now = time.perf_counter()
-        elapsed = (now - step_started_at) * 1000
-        step_started_at = now
-        return elapsed
-
     logger.info(
-        "complete_puzzle started cycle_id=%s puzzle_id=%s",
+        "complete_puzzle started cycle_id=%s puzzle_id=%s user_id=%s",
         cycle_id,
         _truncate_for_log(puzzle_id),
+        current_user["id"],
     )
 
     try:
         phase = "database connection"
         db = get_db()
-        logger.info(
-            "complete_puzzle acquired database connection in %.1fms cycle_id=%s puzzle_id=%s",
-            step_elapsed_ms(),
-            cycle_id,
-            _truncate_for_log(puzzle_id),
-        )
+
+        phase = "cycle lookup"
+        cycle = _load_owned_cycle(db, cycle_id, current_user["id"])
+        if cycle["completed_at"] is not None:
+            raise HTTPException(400, "Cycle already finished")
+        set_id = cycle["set_id"]
 
         phase = "completion insert"
         db.execute(
@@ -394,62 +469,31 @@ async def complete_puzzle(cycle_id: int, puzzle_id: str):
             """,
             (cycle_id, puzzle_id, time.time()),
         )
-        logger.info(
-            "complete_puzzle inserted completion in %.1fms cycle_id=%s puzzle_id=%s",
-            step_elapsed_ms(),
-            cycle_id,
-            _truncate_for_log(puzzle_id),
-        )
 
         phase = "commit"
         db.commit()
-        logger.info(
-            "complete_puzzle committed transaction in %.1fms cycle_id=%s puzzle_id=%s",
-            step_elapsed_ms(),
-            cycle_id,
-            _truncate_for_log(puzzle_id),
-        )
 
         logger.info(
-            "complete_puzzle completed cycle_id=%s set_id=%s puzzle_id=%s total=%.1fms",
+            "complete_puzzle completed cycle_id=%s set_id=%s puzzle_id=%s user_id=%s total=%.1fms",
             cycle_id,
             set_id,
             _truncate_for_log(puzzle_id),
+            current_user["id"],
             elapsed_ms(),
         )
         return {"ok": True}
-        
-    except HTTPException as exc:
-        logger.warning(
-            "complete_puzzle rejected during %s after %.1fms cycle_id=%s set_id=%s puzzle_id=%s status=%s detail=%s",
-            phase,
-            elapsed_ms(),
-            cycle_id,
-            set_id,
-            _truncate_for_log(puzzle_id),
-            exc.status_code,
-            exc.detail,
-        )
-        raise
-    except Exception:
-        logger.exception(
-            "complete_puzzle failed during %s after %.1fms cycle_id=%s set_id=%s puzzle_id=%s",
-            phase,
-            elapsed_ms(),
-            cycle_id,
-            set_id,
-            _truncate_for_log(puzzle_id),
-        )
-        raise
     finally:
         if db is not None:
             db.close()
 
 
 @app.delete("/api/cycles/{cycle_id}/complete/{puzzle_id}")
-async def uncomplete_puzzle(cycle_id: int, puzzle_id: str):
+async def uncomplete_puzzle(
+    cycle_id: int,
+    puzzle_id: str,
+    current_user=Depends(auth_module.require_current_user),
+):
     request_started_at = time.perf_counter()
-    step_started_at = request_started_at
     phase = "request start"
     db = None
     set_id = None
@@ -457,114 +501,51 @@ async def uncomplete_puzzle(cycle_id: int, puzzle_id: str):
     def elapsed_ms() -> float:
         return (time.perf_counter() - request_started_at) * 1000
 
-    def step_elapsed_ms() -> float:
-        nonlocal step_started_at
-        now = time.perf_counter()
-        elapsed = (now - step_started_at) * 1000
-        step_started_at = now
-        return elapsed
-
     logger.info(
-        "uncomplete_puzzle started cycle_id=%s puzzle_id=%s",
+        "uncomplete_puzzle started cycle_id=%s puzzle_id=%s user_id=%s",
         cycle_id,
         _truncate_for_log(puzzle_id),
+        current_user["id"],
     )
 
     try:
         phase = "database connection"
         db = get_db()
-        logger.info(
-            "uncomplete_puzzle acquired database connection in %.1fms cycle_id=%s puzzle_id=%s",
-            step_elapsed_ms(),
-            cycle_id,
-            _truncate_for_log(puzzle_id),
-        )
 
         phase = "cycle lookup"
-        cycle = db.execute(
-            "SELECT * FROM cycles WHERE id = %s",
-            (cycle_id,),
-        ).fetchone()
-        logger.info(
-            "uncomplete_puzzle loaded cycle in %.1fms cycle_id=%s found=%s",
-            step_elapsed_ms(),
-            cycle_id,
-            bool(cycle),
-        )
-        if not cycle:
-            raise HTTPException(404, "Cycle not found")
-
-        phase = "cycle validation"
+        cycle = _load_owned_cycle(db, cycle_id, current_user["id"])
         if cycle["completed_at"] is not None:
             raise HTTPException(400, "Cycle already finished")
         set_id = cycle["set_id"]
-        logger.info(
-            "uncomplete_puzzle validated cycle state in %.1fms cycle_id=%s set_id=%s",
-            step_elapsed_ms(),
-            cycle_id,
-            set_id,
-        )
 
         phase = "completion delete"
         db.execute(
             "DELETE FROM cycle_completions WHERE cycle_id = %s AND puzzle_id = %s",
             (cycle_id, puzzle_id),
         )
-        logger.info(
-            "uncomplete_puzzle deleted completion in %.1fms cycle_id=%s puzzle_id=%s",
-            step_elapsed_ms(),
-            cycle_id,
-            _truncate_for_log(puzzle_id),
-        )
 
         phase = "commit"
         db.commit()
-        logger.info(
-            "uncomplete_puzzle committed transaction in %.1fms cycle_id=%s puzzle_id=%s",
-            step_elapsed_ms(),
-            cycle_id,
-            _truncate_for_log(puzzle_id),
-        )
 
         logger.info(
-            "uncomplete_puzzle completed cycle_id=%s set_id=%s puzzle_id=%s total=%.1fms",
+            "uncomplete_puzzle completed cycle_id=%s set_id=%s puzzle_id=%s user_id=%s total=%.1fms",
             cycle_id,
             set_id,
             _truncate_for_log(puzzle_id),
+            current_user["id"],
             elapsed_ms(),
         )
         return {"ok": True}
-    except HTTPException as exc:
-        logger.warning(
-            "uncomplete_puzzle rejected during %s after %.1fms cycle_id=%s set_id=%s puzzle_id=%s status=%s detail=%s",
-            phase,
-            elapsed_ms(),
-            cycle_id,
-            set_id,
-            _truncate_for_log(puzzle_id),
-            exc.status_code,
-            exc.detail,
-        )
-        raise
-    except Exception:
-        logger.exception(
-            "uncomplete_puzzle failed during %s after %.1fms cycle_id=%s set_id=%s puzzle_id=%s",
-            phase,
-            elapsed_ms(),
-            cycle_id,
-            set_id,
-            _truncate_for_log(puzzle_id),
-        )
-        raise
     finally:
         if db is not None:
             db.close()
 
 
 @app.patch("/api/cycles/{cycle_id}/finish")
-async def finish_cycle(cycle_id: int):
+async def finish_cycle(cycle_id: int, current_user=Depends(auth_module.require_current_user)):
     db = get_db()
     try:
+        _load_owned_cycle(db, cycle_id, current_user["id"])
         completed_count = db.execute(
             "SELECT COUNT(*) AS n FROM cycle_completions WHERE cycle_id = %s",
             (cycle_id,),
@@ -585,9 +566,10 @@ async def finish_cycle(cycle_id: int):
 
 
 @app.get("/api/sets/{set_id}/history")
-async def set_history(set_id: int):
+async def set_history(set_id: int, current_user=Depends(auth_module.require_current_user)):
     db = get_db()
     try:
+        _load_owned_set(db, set_id, current_user["id"])
         cycles = db.execute(
             "SELECT * FROM cycles WHERE set_id = %s ORDER BY cycle_number",
             (set_id,),
@@ -610,28 +592,16 @@ async def set_history(set_id: int):
             cycle_dict["duration_days"] = (end.date() - start.date()).days + 1
         else:
             cycle_dict["duration_days"] = None
-
         for key in TIMESTAMP_FIELDS:
             value = cycle_dict.get(key)
             if value is not None:
                 cycle_dict[key] = _as_utc_datetime(value).isoformat().replace(
-                    "+00:00", "Z"
+                    "+00:00",
+                    "Z",
                 )
         result.append(cycle_dict)
 
     return {"cycles": result, "total_puzzles": total_puzzles}
-
-
-@app.get("/api/ratings")
-async def get_chess_com_ratings(start_date: str = None, end_date: str = None):
-    try:
-        from .chess_com import backfill_ratings, get_ratings
-    except ImportError:
-        from chess_com import backfill_ratings, get_ratings
-
-    await backfill_ratings("lagoat420", start_date, end_date)
-    ratings = get_ratings("lagoat420", start_date, end_date)
-    return {"ratings": ratings}
 
 
 @app.get("/{full_path:path}")
