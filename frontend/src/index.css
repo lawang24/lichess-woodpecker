@@ -53,9 +53,15 @@ input, select {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
   margin-bottom: 24px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
+}
+
+.header-main {
+  flex: 1;
+  min-width: 0;
 }
 
 .card {
@@ -98,6 +104,44 @@ input, select {
 
 .form-row label { min-width: 60px; color: var(--text-dim); font-size: 0.85rem; }
 
+.home-intro {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  margin-bottom: 18px;
+}
+
+.form-help {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin: -4px 0 16px;
+}
+
+.set-form-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(96px, 120px) minmax(80px, 100px) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.set-form-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.set-form-field span {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.set-form-field input {
+  width: 100%;
+}
+
+.set-form-row button {
+  white-space: nowrap;
+}
+
 .auth-card {
   display: grid;
   gap: 12px;
@@ -128,6 +172,11 @@ input, select {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
+}
+
+.auth-status button {
+  white-space: nowrap;
 }
 
 .auth-identity {
@@ -275,6 +324,15 @@ li:has(+ li > .day-separator) .puzzle-item {
   .form-row select {
     flex: 1;
     min-width: 0;
+  }
+
+  .set-form-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .set-form-field-name,
+  .set-form-row button {
+    grid-column: 1 / -1;
   }
 
   .goals-grid {

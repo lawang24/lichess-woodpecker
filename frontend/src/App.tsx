@@ -14,7 +14,7 @@ function LoginCard() {
   return (
     <div className="card auth-card">
       <div className="auth-eyebrow">Authentication Required</div>
-      <h2 className="auth-title">Sign in with Lichess to use Chess Woodpecker.</h2>
+      <h2 className="auth-title">Sign in with Lichess to use Lichess Woodpecker.</h2>
       <p className="auth-copy">Your puzzle sets and cycle history are tied to your signed-in account.</p>
       <a className="btn auth-button" href="/api/auth/lichess/start">Sign In With Lichess</a>
     </div>
@@ -64,8 +64,8 @@ export default function App() {
   return (
     <>
       <div className="header">
-        <div>
-          <h1>Chess Woodpecker</h1>
+        <div className="header-main">
+          <h1>Lichess Woodpecker</h1>
           <h2>Tactical pattern training</h2>
         </div>
         {authState.status === 'signed_in' ? (

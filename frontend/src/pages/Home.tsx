@@ -47,41 +47,59 @@ export default function Home() {
 
   return (
     <>
+      <p className="home-intro">
+        Based on{' '}
+        <a
+          href="https://qualitychess.co.uk/products/improvement/327/the_woodpecker_method_by_axel_smith_and_hans_tikkanen/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          The Woodpecker Method
+        </a>
+        {' '}by GMs Smith and Tikkanen.
+        <br />
+        Solve a fixed set of Lichess puzzles, then repeat it across six faster cycles: 4 weeks, 2
+        weeks, 1 week, 4 days, 2 days, and 1 day until the patterns becomes automatic.
+      </p>
+
       <form className="card" onSubmit={createSet}>
         <h2>Create New Set</h2>
-        <div className="form-row">
-          <label>Name</label>
-          <input
-            type="text"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            style={{ flex: 1 }}
-          />
-        </div>
-        <div className="form-row">
-          <label>Rating</label>
-          <input
-            type="number"
-            value={rating}
-            onChange={e => setRating(parseInt(e.target.value) || 1500)}
-            min={400}
-            max={3000}
-            step={50}
-            style={{ width: 100 }}
-          />
-        </div>
-        <div className="form-row">
-          <label>Count</label>
-          <input
-            type="number"
-            value={count}
-            onChange={e => setCount(parseInt(e.target.value) || 50)}
-            min={5}
-            max={500}
-            style={{ width: 80 }}
-          />
+        <p className="form-help">
+          Sets are pulled from the Lichess puzzle database. Enter a rating and the app randomly
+          draws puzzles from the -200 to +200 Elo band around it.
+        </p>
+        <div className="set-form-row">
+          <label className="set-form-field set-form-field-name">
+            <span>Name</span>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+            />
+          </label>
+          <label className="set-form-field">
+            <span>Rating</span>
+            <input
+              type="number"
+              value={rating}
+              onChange={e => setRating(parseInt(e.target.value) || 1500)}
+              min={400}
+              max={3000}
+              step={50}
+            />
+          </label>
+          <label className="set-form-field">
+            <span>Count</span>
+            <input
+              type="number"
+              value={count}
+              onChange={e => setCount(parseInt(e.target.value) || 50)}
+              min={5}
+              max={500}
+            />
+          </label>
           <button type="submit" disabled={creating}>
-            {creating ? 'Fetching...' : 'Fetch Puzzles'}
+            {creating ? 'Creating...' : 'Create Puzzle Set'}
           </button>
         </div>
       </form>

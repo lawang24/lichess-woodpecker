@@ -31,13 +31,12 @@ export default function Dashboard({ history }: DashboardProps) {
             <tbody>
               {completedCycles.map(cycle => {
                 const schedule = getScheduleForCycle(cycle.cycle_number)
-                const hitTarget = cycle.duration_days <= schedule.days
 
                 return (
                   <tr key={cycle.id} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: 8 }}>#{cycle.cycle_number}</td>
                     <td style={{ padding: 8 }}>{schedule.label}</td>
-                    <td style={{ padding: 8, color: hitTarget ? 'var(--success)' : 'var(--accent)' }}>
+                    <td style={{ padding: 8 }}>
                       {cycle.duration_days}d
                     </td>
                     <td style={{ padding: 8 }}>

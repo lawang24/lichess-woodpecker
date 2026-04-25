@@ -26,7 +26,7 @@ fi
 export FRONTEND_DEV_URL="${FRONTEND_DEV_URL:-http://localhost:5173}"
 export APP_BASE_URL="${APP_BASE_URL:-$FRONTEND_DEV_URL}"
 export SESSION_SECRET="${SESSION_SECRET:-dev-session-secret}"
-export LICHESS_CLIENT_ID="${LICHESS_CLIENT_ID:-chess-woodpecker-local}"
+export LICHESS_CLIENT_ID="${LICHESS_CLIENT_ID:-lichess-woodpecker-local}"
 
 # Backend
 (cd backend && UVICORN_RELOAD="${UVICORN_RELOAD:-1}" uv run python main.py) &

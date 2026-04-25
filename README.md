@@ -1,4 +1,4 @@
-# Chess Woodpecker
+# Lichess Woodpecker
 
 Tactical puzzle trainer based on the [Woodpecker Method](https://www.amazon.com/Woodpecker-Method-Axel-Smith/dp/1784830550) — solve the same set of puzzles in repeated cycles to build pattern recognition.
 
@@ -20,12 +20,12 @@ Add the required backend settings in `.env` before starting:
 
 ```bash
 DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:5432/postgres
-LICHESS_CLIENT_ID=<optional; defaults to chess-woodpecker-local in dev.sh>
+LICHESS_CLIENT_ID=<optional; defaults to lichess-woodpecker-local in dev.sh>
 # In local dev this should be your frontend origin, e.g. http://localhost:5173
 APP_BASE_URL=http://localhost:5173
 ```
 
-`dev.sh` will default `APP_BASE_URL` to `http://localhost:5173`, `SESSION_SECRET` to `dev-session-secret`, and `LICHESS_CLIENT_ID` to `chess-woodpecker-local`. In production, set `SESSION_SECRET` explicitly and choose a stable `LICHESS_CLIENT_ID` for your deployment.
+`dev.sh` will default `APP_BASE_URL` to `http://localhost:5173`, `SESSION_SECRET` to `dev-session-secret`, and `LICHESS_CLIENT_ID` to `lichess-woodpecker-local`. In production, set `SESSION_SECRET` explicitly and choose a stable `LICHESS_CLIENT_ID` for your deployment.
 
 ```bash
 # Install dependencies
