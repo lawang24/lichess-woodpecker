@@ -71,6 +71,24 @@ input, select {
   align-items: center;
 }
 
+.rest-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.rest-copy {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin-top: 2px;
+}
+
+.completion-indicator {
+  color: var(--success);
+}
+
 .form-row {
   display: flex;
   gap: 8px;
@@ -243,6 +261,11 @@ li:has(+ li > .day-separator) .puzzle-item {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
+  }
+
+  .rest-card {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .form-row {

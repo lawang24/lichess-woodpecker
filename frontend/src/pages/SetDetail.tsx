@@ -2,7 +2,7 @@ import type { RefObject } from 'react'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../api'
-import { computeTimeline } from '../timeline'
+import { getCycleStartStatus, type CycleStartStatus } from '../timeline'
 import Dashboard from '../components/Dashboard'
 import TimelineBar from '../components/TimelineBar'
 import Training, { TrainingPuzzleList } from '../components/Training'
@@ -13,7 +13,6 @@ import type {
   PuzzleSet,
   SetHistoryResponse,
   SetOverviewResponse,
-  StartCycleResponse,
 } from '../types'
 
 type CurrentCycleSummary = Pick<CycleRecord, 'id' | 'cycle_number' | 'completed_at'>
@@ -31,6 +30,8 @@ interface SetTimelinesSectionProps {
 interface ActiveCycleSectionProps {
   currentCycle: CurrentCycleSummary | null
   currentCycleDetails: CycleDetailResponse | null
+  cycleStartStatus: CycleStartStatus
+  isStartingCycle: boolean
   onStartCycle: () => void
   onFinishCycle: () => void
   onJumpToCurrentPuzzle: () => void
@@ -77,14 +78,52 @@ function SetTimelinesSection({ history }: SetTimelinesSectionProps) {
 function ActiveCycleSection({
   currentCycle,
   currentCycleDetails,
+  cycleStartStatus,
+  isStartingCycle,
   onStartCycle,
   onFinishCycle,
   onJumpToCurrentPuzzle,
 }: ActiveCycleSectionProps) {
   if (!currentCycle) {
+    if (cycleStartStatus.state === 'active') {
+      return null
+    }
+
+    if (cycleStartStatus.state === 'resting') {
+      const dayLabel = cycleStartStatus.remainingRestDays === 1 ? 'day' : 'days'
+
+      return (
+        <div className="card rest-card">
+          <div>
+            <strong>{cycleStartStatus.remainingRestDays} {dayLabel} of rest remaining</strong>
+            <div className="rest-copy">Cycle #{cycleStartStatus.nextCycleNumber} will be ready after the break.</div>
+          </div>
+          <button onClick={onStartCycle} disabled={isStartingCycle}>
+            {isStartingCycle ? 'Starting...' : 'Start Early'}
+          </button>
+        </div>
+      )
+    }
+
+    if (cycleStartStatus.state === 'complete') {
+      return (
+        <div className="card rest-card">
+          <div>
+            <strong className="completion-indicator">Completed</strong>
+            <div className="rest-copy">All scheduled Woodpecker cycles are finished.</div>
+          </div>
+          <button onClick={onStartCycle} disabled={isStartingCycle}>
+            {isStartingCycle ? 'Starting...' : 'Start Over'}
+          </button>
+        </div>
+      )
+    }
+
     return (
       <div style={{ marginTop: 16 }}>
-        <button onClick={onStartCycle}>Start New Cycle</button>
+        <button onClick={onStartCycle} disabled={isStartingCycle}>
+          {isStartingCycle ? 'Starting...' : 'Start'}
+        </button>
       </div>
     )
   }
@@ -134,6 +173,7 @@ export default function SetDetail() {
   const [setHistory, setSetHistory] = useState<SetHistoryResponse | null>(null)
   const [currentCycle, setCurrentCycle] = useState<CurrentCycleSummary | null>(null)
   const [currentCycleDetails, setCurrentCycleDetails] = useState<CycleDetailResponse | null>(null)
+  const [isStartingCycle, setIsStartingCycle] = useState(false)
   const currentPuzzleRef = useRef<HTMLLIElement | null>(null)
   const latestCycleIdRef = useRef<number | null>(null)
   const pendingPuzzleKeysRef = useRef<Set<string>>(new Set())
@@ -258,31 +298,22 @@ export default function SetDetail() {
     applyCurrentCycleDetails(data.cycleDetails)
   }
 
-  async function refreshCurrentCycleDetails(
-    cycleId: number | null = currentCycle?.id ?? null,
-  ): Promise<void> {
-    if (!cycleId) {
-      return
-    }
-
-    const cycleDetails = await api<CycleDetailResponse>(`/api/cycles/${cycleId}`)
-    applyCurrentCycleDetails(prev => (latestCycleIdRef.current === cycleId ? cycleDetails : prev))
-  }
-
   async function startCycle(): Promise<void> {
     if (!setId) {
       return
     }
 
-    const cycle = await api<StartCycleResponse>(`/api/sets/${setId}/cycles`, { method: 'POST' })
-    const nextCurrentCycle: CurrentCycleSummary = {
-      id: cycle.id,
-      cycle_number: cycle.cycle_number,
-      completed_at: null,
+    if (isStartingCycle) {
+      return
     }
-    latestCycleIdRef.current = cycle.id
-    setCurrentCycle(nextCurrentCycle)
-    await refreshCurrentCycleDetails(cycle.id)
+
+    setIsStartingCycle(true)
+    try {
+      await api(`/api/sets/${setId}/cycles`, { method: 'POST' })
+      await refreshSetDetail()
+    } finally {
+      setIsStartingCycle(false)
+    }
   }
 
   async function resetSet(): Promise<void> {
@@ -382,6 +413,7 @@ export default function SetDetail() {
   }
 
   const { set: setInfo, puzzles } = setOverview
+  const cycleStartStatus = getCycleStartStatus(setHistory.cycles)
 
   return (
     <>
@@ -393,6 +425,8 @@ export default function SetDetail() {
       <ActiveCycleSection
         currentCycle={currentCycle}
         currentCycleDetails={currentCycleDetails}
+        cycleStartStatus={cycleStartStatus}
+        isStartingCycle={isStartingCycle}
         onStartCycle={startCycle}
         onFinishCycle={finishCurrentCycle}
         onJumpToCurrentPuzzle={jumpToCurrentPuzzle}
