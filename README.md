@@ -1,16 +1,19 @@
 # Lichess Woodpecker
 
-Tactical puzzle trainer based on the [Woodpecker Method](https://www.amazon.com/Woodpecker-Method-Axel-Smith/dp/1784830550) — solve the same set of puzzles in repeated cycles to build pattern recognition.
+The [Woodpecker Method](https://qualitychess.co.uk/products/improvement/327/the_woodpecker_method_by_axel_smith_and_hans_tikkanen/) is chess tactics training where you solve the same puzzle set repeatedly on shorter timelines until the patterns become automatic.
 
-Powered by the [Lichess puzzle database](https://database.lichess.org/#puzzles) (~5.8M puzzles).
+Lichess Woodpecker turns the public [Lichess puzzle database](https://database.lichess.org/#puzzles) into fixed, repeatable training sets. Lichess already has excellent puzzle training; this app adds Woodpecker-specific set generation, repeated cycle scheduling, and progress history for the same puzzle list over time.
 
-## How it works
+![Lichess Woodpecker dashboard](docs/assets/lichess-woodpecker-dashboard-placeholder.svg)
 
-1. **Create a puzzle set** — pick a target rating and size; puzzles are sampled from the Lichess database with a weighted distribution around your rating.
-2. **Solve in cycles** — work through the set on Lichess, marking each puzzle as complete.
-3. **Repeat** — start a new cycle and go faster each time.
+**Try it:** https://lichess-woodpecker.onrender.com/
 
-Tracks cycle history (completion count, duration) and Chess.com rating over time.
+## What it does
+
+1. **Create a puzzle set** - choose a target rating and size; puzzles are sampled from the Lichess database around that rating.
+2. **Solve on Lichess** - each puzzle opens on `lichess.org/training`, while this app tracks your fixed set.
+3. **Repeat in cycles** - train the same set across faster Woodpecker cycles: 4 weeks, 2 weeks, 1 week, 4 days, 2 days, and 1 day.
+4. **Review history** - see completion count, duration, and cycle progress over time.
 
 ## Setup
 
@@ -19,13 +22,10 @@ Tracks cycle history (completion count, duration) and Chess.com rating over time
 Add the required backend settings in `.env` before starting:
 
 ```bash
-DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:5432/postgres
-LICHESS_CLIENT_ID=<optional; defaults to lichess-woodpecker-local in dev.sh>
-# In local dev this should be your frontend origin, e.g. http://localhost:5173
-APP_BASE_URL=http://localhost:5173
+cp .env.example .env
 ```
 
-`dev.sh` will default `APP_BASE_URL` to `http://localhost:5173`, `SESSION_SECRET` to `dev-session-secret`, and `LICHESS_CLIENT_ID` to `lichess-woodpecker-local`. In production, set `SESSION_SECRET` explicitly and choose a stable `LICHESS_CLIENT_ID` for your deployment.
+Edit `DATABASE_URL` for your local PostgreSQL instance. `dev.sh` defaults `APP_BASE_URL` to `http://localhost:5173`, `SESSION_SECRET` to `dev-session-secret`, and `LICHESS_CLIENT_ID` to `lichess-woodpecker-local` if they are not set. In production, set `SESSION_SECRET` explicitly and use a stable `LICHESS_CLIENT_ID` for the deployment.
 
 ```bash
 # Install dependencies
@@ -45,6 +45,15 @@ Puzzle sampling uses memory-mapped NumPy arrays built from `backend/data/puzzles
 
 For production, build the frontend (`npm run build` in `frontend/`) and the backend serves it directly from `backend/static/`.
 
+## Lichess API and data use
+
+- OAuth uses PKCE with no explicit scope, because the app only needs the signed-in account identity from `/api/account`.
+- Outbound Lichess API requests include a descriptive `User-Agent`.
+- Lichess asks API clients to make one request at a time and wait at least one minute after a `429`; the app surfaces upstream rate limits instead of retrying aggressively.
+- Puzzle metadata comes from the downloadable public puzzle database, not from scraping Lichess pages.
+
+Relevant docs: [Lichess API tips](https://lichess.org/page/api-tips), [Lichess API reference](https://github.com/lichess-org/api/blob/master/doc/specs/lichess-api.yaml), and [Lichess puzzle database](https://database.lichess.org/#puzzles).
+
 ## Render
 
 After the production build refactor, `backend/` is the deploy root on Render.
@@ -54,7 +63,7 @@ After the production build refactor, `backend/` is the deploy root on Render.
 - **Build Command:** `cd ../frontend && npm ci && npm run build && cd ../backend && uv sync && .venv/bin/python build_puzzle_catalog.py`
 - **Start Command:** `uv run python main.py`
 
-Set `DATABASE_URL` from a Render Postgres instance.
+Set `DATABASE_URL` from a Render Postgres instance, set `APP_BASE_URL` to `https://lichess-woodpecker.onrender.com`, and set a production `SESSION_SECRET`.
 
 ## Stack
 

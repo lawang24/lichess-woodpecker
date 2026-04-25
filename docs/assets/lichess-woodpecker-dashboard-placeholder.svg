@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Lichess Woodpecker screenshot placeholder</title>
+  <desc id="desc">Placeholder image for the Lichess Woodpecker README dashboard screenshot.</desc>
+  <rect width="1280" height="720" fill="#101418"/>
+  <rect x="80" y="80" width="1120" height="560" rx="8" fill="#171d22" stroke="#2b343c" stroke-width="2"/>
+  <text x="640" y="318" fill="#f3f7f2" font-family="Arial, sans-serif" font-size="44" text-anchor="middle">Lichess Woodpecker</text>
+  <text x="640" y="374" fill="#aeb8b1" font-family="Arial, sans-serif" font-size="24" text-anchor="middle">README screenshot placeholder</text>
+  <text x="640" y="420" fill="#7f8a83" font-family="Arial, sans-serif" font-size="20" text-anchor="middle">Replace this asset with the real dashboard screenshot before launch.</text>
+</svg>

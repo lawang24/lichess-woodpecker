@@ -1,4 +1,8 @@
+import asyncio
 from urllib.parse import parse_qs, urlparse
+
+import httpx
+import pytest
 
 
 def _insert_user(database, provider_user_id: str, provider_username: str) -> int:
@@ -129,6 +133,67 @@ def test_invalid_oauth_state_is_rejected(client):
         follow_redirects=False,
     )
     assert callback_response.status_code == 400
+
+
+def test_fetch_lichess_account_sends_user_agent(backend_modules, monkeypatch):
+    auth = backend_modules["auth"]
+    captured = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url, headers):
+            captured["url"] = url
+            captured["headers"] = headers
+            request = httpx.Request("GET", url)
+            return httpx.Response(
+                200,
+                json={"id": "lichess-user-123", "username": "Tester"},
+                request=request,
+            )
+
+    monkeypatch.setattr(auth.httpx, "AsyncClient", FakeAsyncClient)
+
+    account = asyncio.run(auth.fetch_lichess_account("provider-token"))
+
+    assert account == {"id": "lichess-user-123", "username": "Tester"}
+    assert captured["timeout"] == 15.0
+    assert captured["url"] == "https://lichess.org/api/account"
+    assert captured["headers"]["Authorization"] == "Bearer provider-token"
+    assert captured["headers"]["User-Agent"] == auth.LICHESS_USER_AGENT
+
+
+def test_fetch_lichess_account_reports_lichess_rate_limit(backend_modules, monkeypatch):
+    auth = backend_modules["auth"]
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url, headers):
+            request = httpx.Request("GET", url)
+            return httpx.Response(429, json={"error": "Too Many Requests"}, request=request)
+
+    monkeypatch.setattr(auth.httpx, "AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(auth.HTTPException) as exc_info:
+        asyncio.run(auth.fetch_lichess_account("provider-token"))
+
+    assert exc_info.value.status_code == 429
+    assert "wait at least one minute" in exc_info.value.detail
 
 
 def test_sets_are_scoped_to_current_user(client, backend_modules):

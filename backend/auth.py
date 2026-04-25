@@ -16,6 +16,10 @@ except ImportError:
 
 LICHESS_HOST = "https://lichess.org"
 LICHESS_PROVIDER = "lichess"
+LICHESS_USER_AGENT = (
+    "lichess-woodpecker/0.1.0 "
+    "(+https://github.com/lawang24/lichess-woodpecker)"
+)
 SESSION_COOKIE_NAME = "woodpecker_session"
 AUTH_FLOW_COOKIE_NAME = "woodpecker_auth_flow"
 SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
@@ -58,6 +62,13 @@ def _flow_serializer() -> URLSafeTimedSerializer:
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _lichess_headers(access_token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "User-Agent": LICHESS_USER_AGENT,
+    }
 
 
 def _cookie_secure(request: Request) -> bool:
@@ -201,9 +212,16 @@ async def fetch_lichess_account(access_token: str) -> dict:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(
                 f"{LICHESS_HOST}/api/account",
-                headers={"Authorization": f"Bearer {access_token}"},
+                headers=_lichess_headers(access_token),
             )
+            if response.status_code == 429:
+                raise HTTPException(
+                    429,
+                    "Lichess rate limit reached; wait at least one minute before retrying.",
+                )
             response.raise_for_status()
+    except HTTPException:
+        raise
     except httpx.HTTPError as exc:
         raise HTTPException(502, "Failed to fetch Lichess account") from exc
 
