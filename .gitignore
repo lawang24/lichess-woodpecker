@@ -20,6 +20,9 @@ wheels/
 # Claude Code
 .claude
 
+# Local tooling
+.mcp.json
+
 # Full Lichess puzzle CSV (only lightweight data/puzzles.csv.zst is tracked)
 puzzles/lichess_db_puzzle.csv.zst
 backend/data/puzzle_ids.npy
