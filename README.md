@@ -4,7 +4,7 @@ Based on [The Woodpecker Method](https://qualitychess.co.uk/products/improvement
 
 Solve a fixed set of Lichess puzzles, then repeat it across six faster cycles: 4 weeks, 2 weeks, 1 week, 4 days, 2 days, and 1 day until the patterns become automatic. Automatically tracks and visualizes progress so you don't have to track it manually.
 
-Lightweight and reuses Lichess's UI where possible — easy to clone, modify, and self-host.
+Lightweight and reuses Lichess's UI where possible, making it simple to clone, modify, and self-host.
 
 ![Lichess Woodpecker playthrough](docs/assets/playthrough.gif)
 
