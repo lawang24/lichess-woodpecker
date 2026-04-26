@@ -6,7 +6,7 @@ TLDR: Solve a fixed set of Lichess puzzles, then repeat it across six faster cyc
 
 Lightweight and reuses lichess's application where possible -  making it easily cloned, modified, and locally hosted  
 
-<video src="docs/assets/playthrough.mov" controls width="100%" title="Lichess Woodpecker playthrough"></video>
+![Lichess Woodpecker playthrough](docs/assets/playthrough.gif)
 
 **Try it here:** [https://lichess-woodpecker.onrender.com/](https://lichess-woodpecker.onrender.com/)
 
