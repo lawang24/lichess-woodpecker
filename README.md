@@ -2,7 +2,7 @@
 
 Based on [The Woodpecker Method](https://qualitychess.co.uk/products/improvement/327/the_woodpecker_method_by_axel_smith_and_hans_tikkanen/) by GMs Smith and Tikkanen.
 
-TLDR: Solve a fixed set of Lichess puzzles, then repeat it across six faster cycles: 4 weeks, 2 weeks, 1 week, 4 days, 2 days, and 1 day until the patterns becomes automatic. Automatically tracks and vizualises progress so you don't have to manually. 
+Solve a fixed set of Lichess puzzles, then repeat it across six faster cycles: 4 weeks, 2 weeks, 1 week, 4 days, 2 days, and 1 day until the patterns becomes automatic. Automatically tracks and vizualises progress so you don't have to manually. 
 
 Lightweight and reuses lichess's application where possible -  making it easily cloned, modified, and locally hosted  
 
