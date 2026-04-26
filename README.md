@@ -1,21 +1,23 @@
 # Lichess Woodpecker
 
-The [Woodpecker Method](https://qualitychess.co.uk/products/improvement/327/the_woodpecker_method_by_axel_smith_and_hans_tikkanen/) is chess tactics training where you solve the same puzzle set repeatedly on shorter timelines until the patterns become automatic.
+Based on [The Woodpecker Method](https://qualitychess.co.uk/products/improvement/327/the_woodpecker_method_by_axel_smith_and_hans_tikkanen/) by GMs Smith and Tikkanen.
 
-Lichess Woodpecker turns the public [Lichess puzzle database](https://database.lichess.org/#puzzles) into fixed, repeatable training sets. Lichess already has excellent puzzle training; this app adds Woodpecker-specific set generation, repeated cycle scheduling, and progress history for the same puzzle list over time.
+TLDR: Solve a fixed set of Lichess puzzles, then repeat it across six faster cycles: 4 weeks, 2 weeks, 1 week, 4 days, 2 days, and 1 day until the patterns becomes automatic. Automatically tracks and vizualises progress so you don't have to manually. 
 
-![Lichess Woodpecker dashboard](docs/assets/lichess-woodpecker-dashboard-placeholder.svg)
+Lightweight and reuses lichess's application where possible -  making it easily cloned, modified, and locally hosted  
 
-**Try it:** https://lichess-woodpecker.onrender.com/
+<video src="docs/assets/playthrough.mov" controls width="100%" title="Lichess Woodpecker playthrough"></video>
 
-## What it does
+**Try it here:** [https://lichess-woodpecker.onrender.com/](https://lichess-woodpecker.onrender.com/)
 
-1. **Create a puzzle set** - choose a target rating and size; puzzles are sampled from the Lichess database around that rating.
-2. **Solve on Lichess** - each puzzle opens on `lichess.org/training`, while this app tracks your fixed set.
+## Basic Guide
+
+1. **Create a tailored puzzle set** - choose a target puzzle rating and quantity; puzzles are sampled from the Lichess database +200/-200 around that rating.
+2. **Solve on Lichess** - each puzzle opens on `lichess.org/training`, while this app tracks the ones you've opened / completed.
 3. **Repeat in cycles** - train the same set across faster Woodpecker cycles: 4 weeks, 2 weeks, 1 week, 4 days, 2 days, and 1 day.
 4. **Review history** - see completion count, duration, and cycle progress over time.
 
-## Setup
+## Local Development Setup
 
 **Prerequisites:** Python 3.14+, Node 18+, PostgreSQL 16+, [uv](https://github.com/astral-sh/uv)
 
@@ -45,28 +47,8 @@ Puzzle sampling uses memory-mapped NumPy arrays built from `backend/data/puzzles
 
 For production, build the frontend (`npm run build` in `frontend/`) and the backend serves it directly from `backend/static/`.
 
-## Lichess API and data use
-
-- OAuth uses PKCE with no explicit scope, because the app only needs the signed-in account identity from `/api/account`.
-- Outbound Lichess API requests include a descriptive `User-Agent`.
-- Lichess asks API clients to make one request at a time and wait at least one minute after a `429`; the app surfaces upstream rate limits instead of retrying aggressively.
-- Puzzle metadata comes from the downloadable public puzzle database, not from scraping Lichess pages.
-
-Relevant docs: [Lichess API tips](https://lichess.org/page/api-tips), [Lichess API reference](https://github.com/lichess-org/api/blob/master/doc/specs/lichess-api.yaml), and [Lichess puzzle database](https://database.lichess.org/#puzzles).
-
-## Render
-
-After the production build refactor, `backend/` is the deploy root on Render.
-
-- **Runtime:** `Python 3`
-- **Root Directory:** `backend`
-- **Build Command:** `cd ../frontend && npm ci && npm run build && cd ../backend && uv sync && .venv/bin/python build_puzzle_catalog.py`
-- **Start Command:** `uv run python main.py`
-
-Set `DATABASE_URL` from a Render Postgres instance, set `APP_BASE_URL` to `https://lichess-woodpecker.onrender.com`, and set a production `SESSION_SECRET`.
-
 ## Stack
 
-- **Backend:** FastAPI, PostgreSQL, NumPy
-- **Frontend:** React, Vite, Chart.js
+- **Backend:** FastAPI, PostgreSQL, Authlib
+- **Frontend:** React, Vite, Chart.js, 
 - **Data:** Lichess puzzle DB (stripped to ID + rating, ~32MB compressed)
