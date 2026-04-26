@@ -21,31 +21,43 @@ Lightweight and reuses lichess's application where possible -  making it easily 
 
 **Prerequisites:** Python 3.14+, Node 18+, PostgreSQL 16+, [uv](https://github.com/astral-sh/uv)
 
-Add the required backend settings in `.env` before starting:
+### 1. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `DATABASE_URL` for your local PostgreSQL instance. `dev.sh` defaults `APP_BASE_URL` to `http://localhost:5173`, `SESSION_SECRET` to `dev-session-secret`, and `LICHESS_CLIENT_ID` to `lichess-woodpecker-local` if they are not set. In production, set `SESSION_SECRET` explicitly and use a stable `LICHESS_CLIENT_ID` for the deployment.
+Set `DATABASE_URL` to point at your local PostgreSQL instance. That's the only variable you need to edit — `dev.sh` fills in sensible defaults for the rest.
+
+### 2. Install dependencies
 
 ```bash
-# Install dependencies
 cd backend && uv sync && cd ..
 cd frontend && npm install && cd ..
+```
 
-# Build the compact puzzle catalog (one-time or after puzzles.csv.zst changes)
+### 3. Build the puzzle catalog
+
+Puzzle sampling uses memory-mapped NumPy arrays built from `backend/data/puzzles.csv.zst`. Run this once (and again whenever `puzzles.csv.zst` changes):
+
+```bash
 cd backend && .venv/bin/python build_puzzle_catalog.py && cd ..
+```
 
-# Run both servers
+### 4. Run both servers
+
+```bash
 ./dev.sh
 ```
 
-The app runs at `http://localhost:5173` (frontend) with the API at `http://localhost:8000`.
-`./dev.sh` enables FastAPI hot reload for the backend by default. Set `UVICORN_RELOAD=0` if you need to disable it.
-Puzzle sampling uses memory-mapped NumPy arrays built from `backend/data/puzzles.csv.zst`, so build the compact catalog before creating sets.
+- Frontend: `http://localhost:5173`
+- API: `http://localhost:8000`
 
-For production, build the frontend (`npm run build` in `frontend/`) and the backend serves it directly from `backend/static/`.
+Backend hot reload is on by default; set `UVICORN_RELOAD=0` to disable.
+
+### Production build
+
+Build the frontend with `npm run build` in `frontend/`. The backend serves the bundle directly from `backend/static/`. For deployments, set `SESSION_SECRET` explicitly and use a stable `LICHESS_CLIENT_ID`.
 
 ## Stack
 
