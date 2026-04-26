@@ -5,10 +5,12 @@ import { api } from '../api'
 import { computeTimeline, formatDate } from '../timeline'
 import type { SetListItem } from '../types'
 
+const DEFAULT_PUZZLE_COUNT = 500
+
 export default function Home() {
   const [sets, setSets] = useState<SetListItem[]>([])
   const [name, setName] = useState('Woodpecker Set')
-  const [count, setCount] = useState(50)
+  const [count, setCount] = useState(DEFAULT_PUZZLE_COUNT)
   const [rating, setRating] = useState(1500)
   const [creating, setCreating] = useState(false)
   const navigate = useNavigate()
@@ -93,7 +95,7 @@ export default function Home() {
             <input
               type="number"
               value={count}
-              onChange={e => setCount(parseInt(e.target.value) || 50)}
+              onChange={e => setCount(parseInt(e.target.value) || DEFAULT_PUZZLE_COUNT)}
               min={5}
               max={500}
             />

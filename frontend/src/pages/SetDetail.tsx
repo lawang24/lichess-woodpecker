@@ -33,6 +33,7 @@ interface ActiveCycleSectionProps {
   cycleStartStatus: CycleStartStatus
   isStartingCycle: boolean
   onStartCycle: () => void
+  onRestartCycles: () => void
   onFinishCycle: () => void
   onJumpToCurrentPuzzle: () => void
 }
@@ -81,6 +82,7 @@ function ActiveCycleSection({
   cycleStartStatus,
   isStartingCycle,
   onStartCycle,
+  onRestartCycles,
   onFinishCycle,
   onJumpToCurrentPuzzle,
 }: ActiveCycleSectionProps) {
@@ -112,7 +114,7 @@ function ActiveCycleSection({
             <strong className="completion-indicator">Completed</strong>
             <div className="rest-copy">All scheduled Woodpecker cycles are finished.</div>
           </div>
-          <button onClick={onStartCycle} disabled={isStartingCycle}>
+          <button onClick={onRestartCycles} disabled={isStartingCycle}>
             {isStartingCycle ? 'Starting...' : 'Start Over'}
           </button>
         </div>
@@ -329,6 +331,29 @@ export default function SetDetail() {
     await refreshSetDetail()
   }
 
+  async function restartCycles(): Promise<void> {
+    if (!setId) {
+      return
+    }
+
+    if (isStartingCycle) {
+      return
+    }
+
+    if (!confirm('Start over? All cycle history for this set will be deleted.')) {
+      return
+    }
+
+    setIsStartingCycle(true)
+    try {
+      await api(`/api/sets/${setId}/reset`, { method: 'POST' })
+      await api(`/api/sets/${setId}/cycles`, { method: 'POST' })
+      await refreshSetDetail()
+    } finally {
+      setIsStartingCycle(false)
+    }
+  }
+
   async function finishCurrentCycle(): Promise<void> {
     if (!currentCycle) {
       return
@@ -428,6 +453,7 @@ export default function SetDetail() {
         cycleStartStatus={cycleStartStatus}
         isStartingCycle={isStartingCycle}
         onStartCycle={startCycle}
+        onRestartCycles={restartCycles}
         onFinishCycle={finishCurrentCycle}
         onJumpToCurrentPuzzle={jumpToCurrentPuzzle}
       />
