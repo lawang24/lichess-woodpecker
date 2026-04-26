@@ -228,6 +228,29 @@ def test_other_user_cannot_access_foreign_resources(client, backend_modules):
     assert client.patch(f"/api/cycles/{cycle_id}/finish").status_code == 404
 
 
+def test_cycle_creation_is_capped_and_reset_restarts(client, backend_modules):
+    database = backend_modules["database"]
+    auth = backend_modules["auth"]
+
+    user_id = _insert_user(database, "cycle-cap-id", "CycleCap")
+    set_id = _insert_set(database, user_id)
+    for cycle_number in range(1, 7):
+        _insert_cycle(database, set_id, cycle_number)
+
+    _login_client(client, auth, user_id)
+
+    capped_response = client.post(f"/api/sets/{set_id}/cycles")
+    assert capped_response.status_code == 400
+    assert "All scheduled Woodpecker cycles" in capped_response.json()["detail"]
+
+    reset_response = client.post(f"/api/sets/{set_id}/reset")
+    assert reset_response.status_code == 200
+
+    restart_response = client.post(f"/api/sets/{set_id}/cycles")
+    assert restart_response.status_code == 200
+    assert restart_response.json()["cycle_number"] == 1
+
+
 def test_logout_revokes_session(client, backend_modules):
     database = backend_modules["database"]
     auth = backend_modules["auth"]

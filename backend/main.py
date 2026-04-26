@@ -20,6 +20,7 @@ except ImportError:
 BACKEND_DIR = os.path.abspath(os.path.dirname(__file__))
 FRONTEND_DIST = os.path.join(BACKEND_DIR, "static")
 FRONTEND_DEV_URL = os.environ.get("FRONTEND_DEV_URL", "").rstrip("/")
+WOODPECKER_CYCLE_COUNT = 6
 TIMESTAMP_FIELDS = {
     "created_at",
     "started_at",
@@ -385,6 +386,9 @@ async def start_cycle(set_id: int, current_user=Depends(auth_module.require_curr
             (set_id,),
         ).fetchone()
         next_num = (last_cycle["n"] or 0) + 1
+        if next_num > WOODPECKER_CYCLE_COUNT:
+            raise HTTPException(400, "All scheduled Woodpecker cycles are already complete")
+
         cycle_id = db.execute(
             """
             INSERT INTO cycles (set_id, cycle_number)
