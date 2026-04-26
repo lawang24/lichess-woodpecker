@@ -2,9 +2,9 @@
 
 Based on [The Woodpecker Method](https://qualitychess.co.uk/products/improvement/327/the_woodpecker_method_by_axel_smith_and_hans_tikkanen/) by GMs Smith and Tikkanen.
 
-Solve a fixed set of Lichess puzzles, then repeat it across six faster cycles: 4 weeks, 2 weeks, 1 week, 4 days, 2 days, and 1 day until the patterns becomes automatic. Automatically tracks and vizualises progress so you don't have to manually. 
+Solve a fixed set of Lichess puzzles, then repeat it across six faster cycles: 4 weeks, 2 weeks, 1 week, 4 days, 2 days, and 1 day until the patterns become automatic. Automatically tracks and visualizes progress so you don't have to track it manually.
 
-Lightweight and reuses lichess's application where possible -  making it easily cloned, modified, and locally hosted  
+Lightweight and reuses Lichess's UI where possible — easy to clone, modify, and self-host.
 
 ![Lichess Woodpecker playthrough](docs/assets/playthrough.gif)
 
@@ -62,5 +62,5 @@ Build the frontend with `npm run build` in `frontend/`. The backend serves the b
 ## Stack
 
 - **Backend:** FastAPI, PostgreSQL, Authlib
-- **Frontend:** React, Vite, Chart.js, 
+- **Frontend:** React, Vite, Chart.js
 - **Data:** Lichess puzzle DB (stripped to ID + rating, ~32MB compressed)
