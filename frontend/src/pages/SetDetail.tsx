@@ -4,6 +4,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api } from '../api'
 import { getCycleStartStatus, type CycleStartStatus } from '../timeline'
 import Dashboard from '../components/Dashboard'
+import LoadingCard from '../components/LoadingCard'
 import TimelineBar from '../components/TimelineBar'
 import Training, { TrainingPuzzleList } from '../components/Training'
 import type {
@@ -16,6 +17,13 @@ import type {
 } from '../types'
 
 type CurrentCycleSummary = Pick<CycleRecord, 'id' | 'cycle_number' | 'completed_at'>
+
+interface SetDetailData {
+  overviewResponse: SetOverviewResponse
+  historyResponse: SetHistoryResponse
+  nextCurrentCycle: CurrentCycleSummary | null
+  cycleDetails: CycleDetailResponse | null
+}
 
 interface SetDetailsSectionProps {
   setInfo: PuzzleSet
@@ -131,7 +139,7 @@ function ActiveCycleSection({
   }
 
   if (!currentCycleDetails) {
-    return null
+    return <LoadingCard>Loading...</LoadingCard>
   }
 
   return (
@@ -175,6 +183,8 @@ export default function SetDetail() {
   const [setHistory, setSetHistory] = useState<SetHistoryResponse | null>(null)
   const [currentCycle, setCurrentCycle] = useState<CurrentCycleSummary | null>(null)
   const [currentCycleDetails, setCurrentCycleDetails] = useState<CycleDetailResponse | null>(null)
+  const [isLoadingSetDetail, setIsLoadingSetDetail] = useState(true)
+  const [setDetailError, setSetDetailError] = useState<string | null>(null)
   const [isStartingCycle, setIsStartingCycle] = useState(false)
   const currentPuzzleRef = useRef<HTMLLIElement | null>(null)
   const latestCycleIdRef = useRef<number | null>(null)
@@ -238,12 +248,15 @@ export default function SetDetail() {
     [applyCurrentCycleDetails, currentCycleDetails],
   )
 
-  const fetchSetDetailData = useCallback(async (): Promise<{
-    overviewResponse: SetOverviewResponse
-    historyResponse: SetHistoryResponse
-    nextCurrentCycle: CurrentCycleSummary | null
-    cycleDetails: CycleDetailResponse | null
-  }> => {
+  const applySetDetailData = useCallback((data: SetDetailData): void => {
+    latestCycleIdRef.current = data.nextCurrentCycle?.id ?? null
+    setSetOverview(data.overviewResponse)
+    setSetHistory(data.historyResponse)
+    setCurrentCycle(data.nextCurrentCycle)
+    applyCurrentCycleDetails(data.cycleDetails)
+  }, [applyCurrentCycleDetails])
+
+  const fetchSetDetailData = useCallback(async (): Promise<SetDetailData> => {
     if (!setId) {
       throw new Error('Set id is required')
     }
@@ -268,36 +281,49 @@ export default function SetDetail() {
   useEffect(() => {
     let cancelled = false
 
+    setIsLoadingSetDetail(true)
+    setSetDetailError(null)
+
     void fetchSetDetailData()
       .then(data => {
         if (cancelled) {
           return
         }
 
-        latestCycleIdRef.current = data.nextCurrentCycle?.id ?? null
-        setSetOverview(data.overviewResponse)
-        setSetHistory(data.historyResponse)
-        setCurrentCycle(data.nextCurrentCycle)
-        applyCurrentCycleDetails(data.cycleDetails)
+        applySetDetailData(data)
       })
       .catch(error => {
         if (!cancelled) {
+          const message = error instanceof Error ? error.message : String(error)
+          setSetDetailError(message)
           console.error(error)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingSetDetail(false)
         }
       })
 
     return () => {
       cancelled = true
     }
-  }, [applyCurrentCycleDetails, fetchSetDetailData])
+  }, [applySetDetailData, fetchSetDetailData])
 
   async function refreshSetDetail(): Promise<void> {
-    const data = await fetchSetDetailData()
-    latestCycleIdRef.current = data.nextCurrentCycle?.id ?? null
-    setSetOverview(data.overviewResponse)
-    setSetHistory(data.historyResponse)
-    setCurrentCycle(data.nextCurrentCycle)
-    applyCurrentCycleDetails(data.cycleDetails)
+    setIsLoadingSetDetail(true)
+    setSetDetailError(null)
+
+    try {
+      const data = await fetchSetDetailData()
+      applySetDetailData(data)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setSetDetailError(message)
+      throw error
+    } finally {
+      setIsLoadingSetDetail(false)
+    }
   }
 
   async function startCycle(): Promise<void> {
@@ -433,8 +459,28 @@ export default function SetDetail() {
     currentPuzzleRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
 
-  if (!setId || !setOverview || !setHistory) {
-    return null
+  if (!setId) {
+    return (
+      <div className="card" style={{ color: 'var(--text-dim)' }}>
+        Set id is required.
+      </div>
+    )
+  }
+
+  if (isLoadingSetDetail && (!setOverview || !setHistory)) {
+    return <LoadingCard>Loading...</LoadingCard>
+  }
+
+  if (setDetailError && (!setOverview || !setHistory)) {
+    return (
+      <div className="card" style={{ color: 'var(--text-dim)' }}>
+        Could not load set details: {setDetailError}
+      </div>
+    )
+  }
+
+  if (!setOverview || !setHistory) {
+    return <LoadingCard>Loading...</LoadingCard>
   }
 
   const { set: setInfo, puzzles } = setOverview
@@ -443,6 +489,7 @@ export default function SetDetail() {
   return (
     <>
       <Link to="/" className="back-link">&larr; Back to sets</Link>
+      {isLoadingSetDetail && <LoadingCard>Loading...</LoadingCard>}
       <SetDetailsSection setInfo={setInfo} puzzleCount={puzzles.length} onReset={resetSet} />
 
       <SetTimelinesSection history={setHistory} />

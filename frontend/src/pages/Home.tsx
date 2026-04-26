@@ -2,13 +2,16 @@ import type { FormEvent } from 'react'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import LoadingCard from '../components/LoadingCard'
 import { computeTimeline, formatDate } from '../timeline'
 import type { SetListItem } from '../types'
 
 const DEFAULT_PUZZLE_COUNT = 500
 
 export default function Home() {
-  const [sets, setSets] = useState<SetListItem[]>([])
+  const [sets, setSets] = useState<SetListItem[] | null>(null)
+  const [setsError, setSetsError] = useState<string | null>(null)
+  const [isLoadingSets, setIsLoadingSets] = useState(true)
   const [name, setName] = useState('Woodpecker Set')
   const [count, setCount] = useState(DEFAULT_PUZZLE_COUNT)
   const [rating, setRating] = useState(1500)
@@ -16,12 +19,25 @@ export default function Home() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    void loadSets()
+    void loadSets().catch(error => {
+      console.error(error)
+    })
   }, [])
 
   async function loadSets(): Promise<void> {
-    const data = await api<SetListItem[]>('/api/sets')
-    setSets(data)
+    setIsLoadingSets(true)
+    setSetsError(null)
+
+    try {
+      const data = await api<SetListItem[]>('/api/sets')
+      setSets(data)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setSetsError(message)
+      throw error
+    } finally {
+      setIsLoadingSets(false)
+    }
   }
 
   async function createSet(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -107,12 +123,18 @@ export default function Home() {
       </form>
 
       <h2>Your Sets</h2>
-      {sets.length === 0 ? (
+      {isLoadingSets ? (
+        <LoadingCard>Loading...</LoadingCard>
+      ) : setsError ? (
+        <div className="card" style={{ color: 'var(--text-dim)' }}>
+          Could not load sets: {setsError}
+        </div>
+      ) : sets && sets.length === 0 ? (
         <div className="card" style={{ color: 'var(--text-dim)' }}>
           No puzzle sets yet. Create one above.
         </div>
       ) : (
-        sets.map(s => {
+        sets?.map(s => {
           const timeline = computeTimeline(s.cycles || [])
           return (
             <div key={s.id} className="card card-row">

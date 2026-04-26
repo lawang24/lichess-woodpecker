@@ -184,6 +184,28 @@ input, select {
   font-size: 0.9rem;
 }
 
+.loading-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+.loading-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--surface2);
+  border-top-color: var(--success);
+  border-radius: 50%;
+  animation: loading-spin 0.8s linear infinite;
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Puzzle list */
 .puzzle-list { list-style: none; width: 100%; }
 

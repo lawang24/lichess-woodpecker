@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ApiError, api } from './api'
+import LoadingCard from './components/LoadingCard'
 import Home from './pages/Home'
 import SetDetail from './pages/SetDetail'
 import type { User } from './types'
@@ -77,7 +78,7 @@ export default function App() {
       </div>
 
       {authState.status === 'loading' ? (
-        <div className="card" style={{ color: 'var(--text-dim)' }}>Loading account...</div>
+        <LoadingCard>Loading...</LoadingCard>
       ) : authState.status === 'signed_in' ? (
         <Routes>
           <Route path="/" element={<Home />} />
