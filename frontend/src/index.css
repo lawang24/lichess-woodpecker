@@ -6,6 +6,10 @@
   --text: #eee;
   --text-dim: #999;
   --success: #4ecca3;
+  --success-strong: #2fa47f;
+  --danger: #ff6b6b;
+  --danger-strong: #d94848;
+  --replace: #4f8cff;
   --border: #333;
 }
 
@@ -229,7 +233,9 @@ input, select {
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--border);
+  transition: background 0.12s ease;
 }
+.puzzle-item:hover { background: var(--surface2); }
 li:has(+ li > .day-separator) .puzzle-item {
   border-bottom: none;
 }
@@ -244,10 +250,53 @@ li:has(+ li > .day-separator) .puzzle-item {
   gap: 12px;
   padding: 8px 12px;
   flex: 1;
+  min-width: 0;
   color: var(--text);
   text-decoration: none;
 }
-.puzzle-link:hover { background: var(--surface2); text-decoration: none; }
+.puzzle-link:hover { text-decoration: none; }
+.puzzle-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.puzzle-result-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.puzzle-result-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: white;
+}
+.puzzle-result-button:hover {
+  opacity: 1;
+  filter: brightness(1.08);
+}
+.puzzle-result-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.puzzle-result-button.solved { background: var(--success-strong); }
+.puzzle-result-button.missed { background: var(--danger-strong); }
+.puzzle-result-button.replace { background: var(--replace); }
 
 .btn-complete {
   margin-left: auto;

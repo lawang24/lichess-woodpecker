@@ -1,5 +1,5 @@
 import type { RefObject } from 'react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -29,12 +29,53 @@ interface TrainingPuzzleListProps {
   cycle: CycleRecord
   puzzles: CyclePuzzle[]
   currentPuzzleRef: RefObject<HTMLLIElement | null>
-  onCompletePuzzle: (puzzleId: string) => void
-  onUncompletePuzzle: (puzzleId: string) => void
+  onCompletePuzzle: (puzzleId: string) => void | Promise<void>
+  onUncompletePuzzle: (puzzleId: string) => void | Promise<void>
 }
+
+type PuzzleResultAction = 'solved' | 'missed' | 'replace'
+
+interface PuzzleResultActionConfig {
+  id: PuzzleResultAction
+  label: string
+}
+
+const PUZZLE_RESULT_ACTIONS: PuzzleResultActionConfig[] = [
+  { id: 'solved', label: 'Solved' },
+  { id: 'missed', label: 'Missed' },
+  { id: 'replace', label: 'Replace' },
+]
 
 function toDateStr(date: Date): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function PuzzleResultIcon({ action }: { action: PuzzleResultAction }) {
+  if (action === 'solved') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+    )
+  }
+
+  if (action === 'missed') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M18 6 6 18" />
+        <path d="m6 6 12 12" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M3 12a9 9 0 0 1 15.55-6.18" />
+      <path d="M19 2v5h-5" />
+      <path d="M21 12a9 9 0 0 1-15.55 6.18" />
+      <path d="M5 22v-5h5" />
+    </svg>
+  )
 }
 
 export default function Training({
@@ -216,12 +257,49 @@ export function TrainingPuzzleList({
   const schedule = getScheduleForCycle(cycle.cycle_number)
   const dailyGoal = Math.ceil(puzzles.length / schedule.days)
   const firstUncompleted = puzzles.findIndex(puzzle => !puzzle.completed)
+  const [pendingResultPuzzleIds, setPendingResultPuzzleIds] = useState<Set<string>>(() => new Set())
+
+  function showPuzzleResultActions(puzzleId: string): void {
+    setPendingResultPuzzleIds(prev => {
+      if (prev.has(puzzleId)) {
+        return prev
+      }
+
+      const next = new Set(prev)
+      next.add(puzzleId)
+      return next
+    })
+  }
+
+  function clearPuzzleResultActions(puzzleId: string): void {
+    setPendingResultPuzzleIds(prev => {
+      if (!prev.has(puzzleId)) {
+        return prev
+      }
+
+      const next = new Set(prev)
+      next.delete(puzzleId)
+      return next
+    })
+  }
+
+  function completeWithResultAction(puzzleId: string): void {
+    try {
+      const completion = onCompletePuzzle(puzzleId)
+      void Promise.resolve(completion)
+        .then(() => clearPuzzleResultActions(puzzleId))
+        .catch(() => undefined)
+    } catch {
+      // Keep the result buttons visible if completion fails synchronously.
+    }
+  }
 
   return (
     <ul className="puzzle-list">
       {puzzles.map((puzzle, index) => {
         const showSeparator = index > 0 && index % dailyGoal === 0
         const dayNum = Math.floor(index / dailyGoal) + 1
+        const showResultActions = !puzzle.completed && pendingResultPuzzleIds.has(puzzle.puzzle_id)
 
         return (
           <li
@@ -239,7 +317,7 @@ export function TrainingPuzzleList({
                 rel="noopener noreferrer"
                 onClick={() => {
                   if (!puzzle.completed) {
-                    onCompletePuzzle(puzzle.puzzle_id)
+                    showPuzzleResultActions(puzzle.puzzle_id)
                   }
                 }}
                 onContextMenu={event => {
@@ -251,9 +329,25 @@ export function TrainingPuzzleList({
               >
                 <span className="check">{puzzle.completed ? '\u2713' : ''}</span>
                 <span className="num">#{index + 1}</span>
-                <span>{puzzle.puzzle_id}</span>
+                <span className="puzzle-id">{puzzle.puzzle_id}</span>
                 {puzzle.completed && <span className="rating">{puzzle.rating}</span>}
               </a>
+              {showResultActions && (
+                <div className="puzzle-result-actions" aria-label={`Result actions for ${puzzle.puzzle_id}`}>
+                  {PUZZLE_RESULT_ACTIONS.map(action => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      className={`puzzle-result-button ${action.id}`}
+                      aria-label={`${action.label} puzzle ${puzzle.puzzle_id}`}
+                      title={action.label}
+                      onClick={() => completeWithResultAction(puzzle.puzzle_id)}
+                    >
+                      <PuzzleResultIcon action={action.id} />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </li>
         )
