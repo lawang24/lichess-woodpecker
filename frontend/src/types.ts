@@ -38,6 +38,7 @@ export interface CyclePuzzle extends PuzzleSetItem {
   completed: boolean
   completed_at: number | null
   solved: boolean | null
+  previous_solved: boolean | null
 }
 
 export interface SetListItem extends PuzzleSet {

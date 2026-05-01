@@ -114,6 +114,29 @@ def _load_owned_cycle(db, cycle_id: int, user_id: int):
     return cycle
 
 
+def _refresh_finished_cycle_counts(db, set_id: int) -> None:
+    db.execute(
+        """
+        UPDATE cycles c
+        SET completed_count = counts.completed_count,
+            solved_count = counts.solved_count
+        FROM (
+            SELECT
+                c.id,
+                COUNT(pc.puzzle_id) AS completed_count,
+                COUNT(pc.puzzle_id) FILTER (WHERE pc.solved) AS solved_count
+            FROM cycles c
+            LEFT JOIN puzzle_completions pc ON pc.cycle_id = c.id
+            WHERE c.set_id = %s
+            GROUP BY c.id
+        ) counts
+        WHERE c.id = counts.id
+          AND c.completed_at IS NOT NULL
+        """,
+        (set_id,),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     auth_module.validate_auth_configuration()
@@ -423,10 +446,23 @@ async def get_cycle(cycle_id: int, current_user=Depends(auth_module.require_curr
             "SELECT puzzle_id, completed_at, solved FROM puzzle_completions WHERE cycle_id = %s",
             (cycle_id,),
         ).fetchall()
+        previous_completions = db.execute(
+            """
+            SELECT pc.puzzle_id, pc.solved
+            FROM puzzle_completions pc
+            JOIN cycles c ON c.id = pc.cycle_id
+            WHERE c.set_id = %s
+              AND c.cycle_number = %s
+            """,
+            (cycle["set_id"], cycle["cycle_number"] - 1),
+        ).fetchall()
     finally:
         db.close()
 
     completions_by_puzzle = {completion["puzzle_id"]: completion for completion in completions}
+    previous_solved_by_puzzle = {
+        completion["puzzle_id"]: completion["solved"] for completion in previous_completions
+    }
     puzzles = []
     for item in items:
         puzzle = dict(item)
@@ -435,8 +471,96 @@ async def get_cycle(cycle_id: int, current_user=Depends(auth_module.require_curr
         puzzle["completed"] = completed_at is not None
         puzzle["completed_at"] = completed_at
         puzzle["solved"] = completion["solved"] if completion else None
+        puzzle["previous_solved"] = previous_solved_by_puzzle.get(item["puzzle_id"])
         puzzles.append(puzzle)
     return {"cycle": cycle, "puzzles": puzzles}
+
+
+@app.post("/api/cycles/{cycle_id}/replace/{puzzle_id}")
+async def replace_puzzle(
+    cycle_id: int,
+    puzzle_id: str,
+    current_user=Depends(auth_module.require_current_user),
+):
+    db = None
+
+    try:
+        db = get_db()
+        cycle = _load_owned_cycle(db, cycle_id, current_user["id"])
+        if cycle["completed_at"] is not None:
+            raise HTTPException(400, "Cycle already finished")
+
+        set_id = cycle["set_id"]
+        puzzle_set = db.execute(
+            "SELECT target_rating FROM puzzle_sets WHERE id = %s",
+            (set_id,),
+        ).fetchone()
+        item = db.execute(
+            """
+            SELECT id, set_id, puzzle_id, rating, position
+            FROM puzzle_set_items
+            WHERE set_id = %s AND puzzle_id = %s
+            FOR UPDATE
+            """,
+            (set_id, puzzle_id),
+        ).fetchone()
+        if not item:
+            raise HTTPException(404, "Puzzle not found in cycle set")
+
+        existing_puzzle_ids = {
+            row["puzzle_id"]
+            for row in db.execute(
+                "SELECT puzzle_id FROM puzzle_set_items WHERE set_id = %s",
+                (set_id,),
+            ).fetchall()
+        }
+
+        try:
+            catalog = _get_puzzle_catalog()
+        except CatalogNotBuiltError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+        replacement_rating = puzzle_set["target_rating"] if puzzle_set else None
+        if replacement_rating is None:
+            replacement_rating = item["rating"]
+        replacement = catalog.sample_replacement(replacement_rating, existing_puzzle_ids)
+        if replacement is None:
+            raise HTTPException(409, "No replacement puzzle available")
+
+        db.execute(
+            "DELETE FROM puzzle_completions WHERE set_id = %s AND puzzle_id = %s",
+            (set_id, puzzle_id),
+        )
+        db.execute("DELETE FROM puzzle_set_items WHERE id = %s", (item["id"],))
+        try:
+            new_item = db.execute(
+                """
+                INSERT INTO puzzle_set_items (set_id, puzzle_id, rating, position)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id, set_id, puzzle_id, rating, position
+                """,
+                (
+                    set_id,
+                    replacement["puzzle_id"],
+                    int(replacement["rating"]),
+                    item["position"],
+                ),
+            ).fetchone()
+        except errors.UniqueViolation as exc:
+            raise HTTPException(409, "Replacement puzzle is already in set") from exc
+
+        _refresh_finished_cycle_counts(db, set_id)
+        db.commit()
+
+        puzzle = dict(new_item)
+        puzzle["completed"] = False
+        puzzle["completed_at"] = None
+        puzzle["solved"] = None
+        puzzle["previous_solved"] = None
+        return puzzle
+    finally:
+        if db is not None:
+            db.close()
 
 
 @app.post("/api/cycles/{cycle_id}/complete/{puzzle_id}")

@@ -289,6 +289,7 @@ def test_completion_requires_puzzle_in_cycle_set(client, backend_modules):
             "completed": True,
             "completed_at": cycle_response.json()["puzzles"][0]["completed_at"],
             "solved": True,
+            "previous_solved": None,
         }
     ]
 
@@ -381,6 +382,188 @@ def test_finish_cycle_counts_solved_completed_puzzles(client, backend_modules):
     assert history_response.status_code == 200
     assert history_response.json()["cycles"][0]["completed_count"] == 2
     assert history_response.json()["cycles"][0]["solved_count"] == 1
+
+
+def test_cycle_detail_includes_previous_cycle_results(client, backend_modules):
+    database = backend_modules["database"]
+    auth = backend_modules["auth"]
+
+    user_id = _insert_user(database, "previous-result-id", "PreviousResult")
+    set_id = _insert_set(database, user_id, name="Previous Result Set")
+    _insert_puzzle_item(database, set_id, "previous-solved", position=0)
+    _insert_puzzle_item(database, set_id, "previous-missed", position=1)
+    _insert_puzzle_item(database, set_id, "previous-unseen", position=2)
+    first_cycle_id = _insert_cycle(database, set_id, cycle_number=1)
+    second_cycle_id = _insert_cycle(database, set_id, cycle_number=2)
+
+    _login_client(client, auth, user_id)
+
+    assert client.post(
+        f"/api/cycles/{first_cycle_id}/complete/previous-solved",
+        json={"solved": True},
+    ).status_code == 200
+    assert client.post(
+        f"/api/cycles/{first_cycle_id}/complete/previous-missed",
+        json={"solved": False},
+    ).status_code == 200
+
+    first_cycle_response = client.get(f"/api/cycles/{first_cycle_id}")
+    assert first_cycle_response.status_code == 200
+    assert {
+        puzzle["puzzle_id"]: puzzle["previous_solved"]
+        for puzzle in first_cycle_response.json()["puzzles"]
+    } == {
+        "previous-solved": None,
+        "previous-missed": None,
+        "previous-unseen": None,
+    }
+
+    second_cycle_response = client.get(f"/api/cycles/{second_cycle_id}")
+    assert second_cycle_response.status_code == 200
+    assert {
+        puzzle["puzzle_id"]: {
+            "completed": puzzle["completed"],
+            "solved": puzzle["solved"],
+            "previous_solved": puzzle["previous_solved"],
+        }
+        for puzzle in second_cycle_response.json()["puzzles"]
+    } == {
+        "previous-solved": {
+            "completed": False,
+            "solved": None,
+            "previous_solved": True,
+        },
+        "previous-missed": {
+            "completed": False,
+            "solved": None,
+            "previous_solved": False,
+        },
+        "previous-unseen": {
+            "completed": False,
+            "solved": None,
+            "previous_solved": None,
+        },
+    }
+
+
+def test_replace_puzzle_removes_old_item_and_completions(client, backend_modules, monkeypatch):
+    database = backend_modules["database"]
+    auth = backend_modules["auth"]
+    main = backend_modules["main"]
+
+    user_id = _insert_user(database, "replace-owner-id", "ReplaceOwner")
+    set_id = _insert_set(database, user_id, name="Replace Set", target_rating=1600)
+    _insert_puzzle_item(database, set_id, "keep-puzzle", position=0, rating=1500)
+    old_item_id = _insert_puzzle_item(database, set_id, "old-puzzle", position=1, rating=1400)
+    first_cycle_id = _insert_cycle(database, set_id, cycle_number=1)
+    second_cycle_id = _insert_cycle(database, set_id, cycle_number=2)
+
+    class FakeCatalog:
+        def sample_replacement(self, rating, excluded_puzzle_ids):
+            assert rating == 1600
+            assert excluded_puzzle_ids == {"keep-puzzle", "old-puzzle"}
+            return {"puzzle_id": "new-puzzle", "rating": 1610}
+
+    monkeypatch.setattr(main, "_get_puzzle_catalog", lambda: FakeCatalog())
+    _login_client(client, auth, user_id)
+
+    assert client.post(
+        f"/api/cycles/{first_cycle_id}/complete/old-puzzle",
+        json={"solved": True},
+    ).status_code == 200
+    assert client.patch(f"/api/cycles/{first_cycle_id}/finish").status_code == 200
+    assert client.post(
+        f"/api/cycles/{second_cycle_id}/complete/old-puzzle",
+        json={"solved": False},
+    ).status_code == 200
+
+    response = client.post(f"/api/cycles/{second_cycle_id}/replace/old-puzzle")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": response.json()["id"],
+        "set_id": set_id,
+        "puzzle_id": "new-puzzle",
+        "rating": 1610,
+        "position": 1,
+        "completed": False,
+        "completed_at": None,
+        "solved": None,
+        "previous_solved": None,
+    }
+
+    db = database.get_db()
+    try:
+        items = db.execute(
+            """
+            SELECT id, puzzle_id, rating, position
+            FROM puzzle_set_items
+            WHERE set_id = %s
+            ORDER BY position, puzzle_id
+            """,
+            (set_id,),
+        ).fetchall()
+        old_completion_count = db.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM puzzle_completions
+            WHERE set_id = %s AND puzzle_id = %s
+            """,
+            (set_id, "old-puzzle"),
+        ).fetchone()["n"]
+        first_cycle = db.execute(
+            """
+            SELECT completed_count, solved_count
+            FROM cycles
+            WHERE id = %s
+            """,
+            (first_cycle_id,),
+        ).fetchone()
+    finally:
+        db.close()
+
+    assert items == [
+        {"id": items[0]["id"], "puzzle_id": "keep-puzzle", "rating": 1500, "position": 0},
+        {"id": items[1]["id"], "puzzle_id": "new-puzzle", "rating": 1610, "position": 1},
+    ]
+    assert old_item_id not in {item["id"] for item in items}
+    assert old_completion_count == 0
+    assert first_cycle == {"completed_count": 0, "solved_count": 0}
+
+    cycle_response = client.get(f"/api/cycles/{second_cycle_id}")
+    assert cycle_response.status_code == 200
+    assert [puzzle["puzzle_id"] for puzzle in cycle_response.json()["puzzles"]] == [
+        "keep-puzzle",
+        "new-puzzle",
+    ]
+    assert cycle_response.json()["puzzles"][1]["completed"] is False
+
+
+def test_replace_puzzle_rejects_finished_cycle_and_missing_puzzle(client, backend_modules):
+    database = backend_modules["database"]
+    auth = backend_modules["auth"]
+
+    user_id = _insert_user(database, "replace-reject-id", "ReplaceReject")
+    set_id = _insert_set(database, user_id, name="Replace Reject Set")
+    _insert_puzzle_item(database, set_id, "finished-puzzle", position=0)
+    finished_cycle_id = _insert_cycle(database, set_id, cycle_number=1)
+    active_cycle_id = _insert_cycle(database, set_id, cycle_number=2)
+
+    _login_client(client, auth, user_id)
+
+    assert client.patch(f"/api/cycles/{finished_cycle_id}/finish").status_code == 200
+
+    finished_response = client.post(
+        f"/api/cycles/{finished_cycle_id}/replace/finished-puzzle"
+    )
+    missing_response = client.post(
+        f"/api/cycles/{active_cycle_id}/replace/missing-puzzle"
+    )
+
+    assert finished_response.status_code == 400
+    assert finished_response.json()["detail"] == "Cycle already finished"
+    assert missing_response.status_code == 404
+    assert missing_response.json()["detail"] == "Puzzle not found in cycle set"
 
 
 def test_schema_migrates_existing_cycle_completions_table(backend_modules):

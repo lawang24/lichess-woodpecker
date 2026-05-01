@@ -54,6 +54,7 @@ interface PuzzleListSectionProps {
   currentCycleDetails: CycleDetailResponse | null
   currentPuzzleRef: RefObject<HTMLLIElement | null>
   onCompletePuzzle: (puzzleId: string, solved: boolean) => void
+  onReplacePuzzle: (puzzleId: string) => void
   onUncompletePuzzle: (puzzleId: string) => void
 }
 
@@ -160,6 +161,7 @@ function PuzzleListSection({
   currentCycleDetails,
   currentPuzzleRef,
   onCompletePuzzle,
+  onReplacePuzzle,
   onUncompletePuzzle,
 }: PuzzleListSectionProps) {
   if (!currentCycleDetails) {
@@ -172,6 +174,7 @@ function PuzzleListSection({
       puzzles={currentCycleDetails.puzzles}
       currentPuzzleRef={currentPuzzleRef}
       onCompletePuzzle={onCompletePuzzle}
+      onReplacePuzzle={onReplacePuzzle}
       onUncompletePuzzle={onUncompletePuzzle}
     />
   )
@@ -426,6 +429,41 @@ export default function SetDetail() {
     }
   }
 
+  async function replacePuzzle(puzzleId: string): Promise<void> {
+    if (!currentCycle) {
+      return
+    }
+
+    const cycleId = currentCycle.id
+    const pendingPuzzleKey = getPendingPuzzleKey(cycleId, puzzleId)
+    if (pendingPuzzleKeysRef.current.has(pendingPuzzleKey)) {
+      return
+    }
+
+    pendingPuzzleKeysRef.current.add(pendingPuzzleKey)
+
+    try {
+      const replacementPuzzle = await api<CyclePuzzle>(`/api/cycles/${cycleId}/replace/${puzzleId}`, {
+        method: 'POST',
+      })
+      updatePuzzleInCurrentCycle(cycleId, puzzleId, () => replacementPuzzle)
+      setSetOverview(prev => {
+        if (!prev) {
+          return prev
+        }
+
+        return {
+          ...prev,
+          puzzles: prev.puzzles.map(puzzle => (
+            puzzle.puzzle_id === puzzleId ? replacementPuzzle : puzzle
+          )),
+        }
+      })
+    } finally {
+      pendingPuzzleKeysRef.current.delete(pendingPuzzleKey)
+    }
+  }
+
   async function uncompletePuzzle(puzzleId: string): Promise<void> {
     if (!currentCycle) {
       return
@@ -516,6 +554,7 @@ export default function SetDetail() {
         currentCycleDetails={currentCycleDetails}
         currentPuzzleRef={currentPuzzleRef}
         onCompletePuzzle={completePuzzle}
+        onReplacePuzzle={replacePuzzle}
         onUncompletePuzzle={uncompletePuzzle}
       />
     </>

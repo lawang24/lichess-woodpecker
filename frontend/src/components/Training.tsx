@@ -30,6 +30,7 @@ interface TrainingPuzzleListProps {
   puzzles: CyclePuzzle[]
   currentPuzzleRef: RefObject<HTMLLIElement | null>
   onCompletePuzzle: (puzzleId: string, solved: boolean) => void | Promise<void>
+  onReplacePuzzle: (puzzleId: string) => void | Promise<void>
   onUncompletePuzzle: (puzzleId: string) => void | Promise<void>
 }
 
@@ -38,7 +39,7 @@ type PuzzleResultAction = 'solved' | 'missed' | 'replace'
 interface PuzzleResultActionConfig {
   id: PuzzleResultAction
   label: string
-  solved: boolean
+  solved?: boolean
 }
 
 const PUZZLE_RESULT_ACTIONS: PuzzleResultActionConfig[] = [
@@ -253,6 +254,7 @@ export function TrainingPuzzleList({
   puzzles,
   currentPuzzleRef,
   onCompletePuzzle,
+  onReplacePuzzle,
   onUncompletePuzzle,
 }: TrainingPuzzleListProps) {
   const schedule = getScheduleForCycle(cycle.cycle_number)
@@ -295,12 +297,40 @@ export function TrainingPuzzleList({
     }
   }
 
+  function replaceWithResultAction(puzzleId: string): void {
+    try {
+      const replacement = onReplacePuzzle(puzzleId)
+      void Promise.resolve(replacement)
+        .then(() => clearPuzzleResultActions(puzzleId))
+        .catch(() => undefined)
+    } catch {
+      // Keep the result buttons visible if replacement fails synchronously.
+    }
+  }
+
   return (
     <ul className="puzzle-list">
       {puzzles.map((puzzle, index) => {
         const showSeparator = index > 0 && index % dailyGoal === 0
         const dayNum = Math.floor(index / dailyGoal) + 1
         const showResultActions = !puzzle.completed && pendingResultPuzzleIds.has(puzzle.puzzle_id)
+        const hasPreviousResult = !puzzle.completed && puzzle.previous_solved !== null
+        const resultIndicator = puzzle.completed
+          ? (puzzle.solved ? '\u2713' : '\u2715')
+          : hasPreviousResult
+            ? (puzzle.previous_solved ? '\u2713' : '\u2715')
+            : ''
+        const resultIndicatorClass = [
+          'check',
+          puzzle.completed && !puzzle.solved ? 'missed' : '',
+          hasPreviousResult ? 'previous' : '',
+          hasPreviousResult && !puzzle.previous_solved ? 'missed' : '',
+        ].filter(Boolean).join(' ')
+        const resultIndicatorLabel = puzzle.completed
+          ? `${puzzle.solved ? 'Solved' : 'Missed'} in this cycle`
+          : hasPreviousResult
+            ? `${puzzle.previous_solved ? 'Solved' : 'Missed'} in previous cycle`
+            : undefined
 
         return (
           <li
@@ -328,8 +358,12 @@ export function TrainingPuzzleList({
                   }
                 }}
               >
-                <span className={`check ${puzzle.completed && !puzzle.solved ? 'missed' : ''}`}>
-                  {puzzle.completed ? (puzzle.solved ? '\u2713' : '\u2715') : ''}
+                <span
+                  className={resultIndicatorClass}
+                  aria-label={resultIndicatorLabel}
+                  title={resultIndicatorLabel}
+                >
+                  {resultIndicator}
                 </span>
                 <span className="num">#{index + 1}</span>
                 <span className="puzzle-id">{puzzle.puzzle_id}</span>
@@ -344,7 +378,14 @@ export function TrainingPuzzleList({
                       className={`puzzle-result-button ${action.id}`}
                       aria-label={`${action.label} puzzle ${puzzle.puzzle_id}`}
                       title={action.label}
-                      onClick={() => completeWithResultAction(puzzle.puzzle_id, action.solved)}
+                      onClick={() => {
+                        if (action.id === 'replace') {
+                          replaceWithResultAction(puzzle.puzzle_id)
+                          return
+                        }
+
+                        completeWithResultAction(puzzle.puzzle_id, action.solved ?? false)
+                      }}
                     >
                       <PuzzleResultIcon action={action.id} />
                     </button>
