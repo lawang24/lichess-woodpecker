@@ -24,7 +24,7 @@ export default function Dashboard({ history }: DashboardProps) {
                 <th style={{ padding: 8 }}>Cycle</th>
                 <th style={{ padding: 8 }}>Target</th>
                 <th style={{ padding: 8 }}>Duration</th>
-                <th style={{ padding: 8 }}>Completed</th>
+                <th style={{ padding: 8 }}>Solved</th>
                 <th style={{ padding: 8 }}>Date</th>
               </tr>
             </thead>
@@ -40,7 +40,7 @@ export default function Dashboard({ history }: DashboardProps) {
                       {cycle.duration_days}d
                     </td>
                     <td style={{ padding: 8 }}>
-                      {cycle.completed_count || 0}
+                      {cycle.solved_count || 0}/{cycle.completed_count || 0}
                     </td>
                     <td style={{ padding: 8, color: 'var(--text-dim)', fontSize: '0.85rem' }}>
                       {new Date(cycle.started_at).toLocaleDateString()}

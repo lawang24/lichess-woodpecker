@@ -30,12 +30,14 @@ export interface CycleSummary {
 
 export interface CycleRecord extends CycleSummary {
   completed_count: number | null
+  solved_count: number | null
   duration_days: number | null
 }
 
 export interface CyclePuzzle extends PuzzleSetItem {
   completed: boolean
   completed_at: number | null
+  solved: boolean | null
 }
 
 export interface SetListItem extends PuzzleSet {

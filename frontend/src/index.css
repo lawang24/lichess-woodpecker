@@ -243,6 +243,7 @@ li:has(+ li > .day-separator) .puzzle-item {
 .puzzle-item.completed { opacity: 0.5; }
 .puzzle-item .num { color: var(--text-dim); min-width: 36px; font-size: 0.85rem; }
 .puzzle-item .check { color: var(--success); min-width: 20px; }
+.puzzle-item .check.missed { color: var(--danger); }
 
 .puzzle-link {
   display: flex;

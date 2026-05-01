@@ -53,7 +53,7 @@ interface CompletedCycleInformationSectionProps {
 interface PuzzleListSectionProps {
   currentCycleDetails: CycleDetailResponse | null
   currentPuzzleRef: RefObject<HTMLLIElement | null>
-  onCompletePuzzle: (puzzleId: string) => void
+  onCompletePuzzle: (puzzleId: string, solved: boolean) => void
   onUncompletePuzzle: (puzzleId: string) => void
 }
 
@@ -389,7 +389,7 @@ export default function SetDetail() {
     await refreshSetDetail()
   }
 
-  async function completePuzzle(puzzleId: string): Promise<void> {
+  async function completePuzzle(puzzleId: string, solved: boolean): Promise<void> {
     if (!currentCycle) {
       return
     }
@@ -404,6 +404,7 @@ export default function SetDetail() {
       ...puzzle,
       completed: true,
       completed_at: Date.now() / 1000,
+      solved,
     }))
 
     if (!previousPuzzle || previousPuzzle.completed) {
@@ -413,7 +414,10 @@ export default function SetDetail() {
     pendingPuzzleKeysRef.current.add(pendingPuzzleKey)
 
     try {
-      await api(`/api/cycles/${cycleId}/complete/${puzzleId}`, { method: 'POST' })
+      await api(`/api/cycles/${cycleId}/complete/${puzzleId}`, {
+        method: 'POST',
+        body: JSON.stringify({ solved }),
+      })
     } catch (error) {
       updatePuzzleInCurrentCycle(cycleId, puzzleId, () => previousPuzzle)
       throw error
@@ -437,6 +441,7 @@ export default function SetDetail() {
       ...puzzle,
       completed: false,
       completed_at: null,
+      solved: null,
     }))
 
     if (!previousPuzzle || !previousPuzzle.completed) {

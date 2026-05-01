@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from psycopg import errors
+from pydantic import BaseModel
 
 try:
     from . import auth as auth_module
@@ -31,6 +33,10 @@ TIMESTAMP_FIELDS = {
 }
 logger = logging.getLogger("uvicorn.error")
 _puzzle_catalog = None
+
+
+class CompletePuzzleRequest(BaseModel):
+    solved: bool
 
 
 def _as_utc_datetime(value):
@@ -414,21 +420,21 @@ async def get_cycle(cycle_id: int, current_user=Depends(auth_module.require_curr
             (cycle["set_id"],),
         ).fetchall()
         completions = db.execute(
-            "SELECT puzzle_id, completed_at FROM cycle_completions WHERE cycle_id = %s",
+            "SELECT puzzle_id, completed_at, solved FROM puzzle_completions WHERE cycle_id = %s",
             (cycle_id,),
         ).fetchall()
     finally:
         db.close()
 
-    completed_map = {
-        completion["puzzle_id"]: completion["completed_at"] for completion in completions
-    }
+    completions_by_puzzle = {completion["puzzle_id"]: completion for completion in completions}
     puzzles = []
     for item in items:
         puzzle = dict(item)
-        completed_at = completed_map.get(item["puzzle_id"])
+        completion = completions_by_puzzle.get(item["puzzle_id"])
+        completed_at = completion["completed_at"] if completion else None
         puzzle["completed"] = completed_at is not None
         puzzle["completed_at"] = completed_at
+        puzzle["solved"] = completion["solved"] if completion else None
         puzzles.append(puzzle)
     return {"cycle": cycle, "puzzles": puzzles}
 
@@ -437,6 +443,7 @@ async def get_cycle(cycle_id: int, current_user=Depends(auth_module.require_curr
 async def complete_puzzle(
     cycle_id: int,
     puzzle_id: str,
+    completion: CompletePuzzleRequest,
     current_user=Depends(auth_module.require_current_user),
 ):
     request_started_at = time.perf_counter()
@@ -465,14 +472,18 @@ async def complete_puzzle(
         set_id = cycle["set_id"]
 
         phase = "completion insert"
-        db.execute(
-            """
-            INSERT INTO cycle_completions (cycle_id, puzzle_id, completed_at)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (cycle_id, puzzle_id) DO NOTHING
-            """,
-            (cycle_id, puzzle_id, time.time()),
-        )
+        try:
+            db.execute(
+                """
+                INSERT INTO puzzle_completions (cycle_id, set_id, puzzle_id, completed_at, solved)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (cycle_id, puzzle_id) DO UPDATE
+                SET solved = EXCLUDED.solved
+                """,
+                (cycle_id, set_id, puzzle_id, time.time(), completion.solved),
+            )
+        except errors.ForeignKeyViolation as exc:
+            raise HTTPException(404, "Puzzle not found in cycle set") from exc
 
         phase = "commit"
         db.commit()
@@ -524,7 +535,7 @@ async def uncomplete_puzzle(
 
         phase = "completion delete"
         db.execute(
-            "DELETE FROM cycle_completions WHERE cycle_id = %s AND puzzle_id = %s",
+            "DELETE FROM puzzle_completions WHERE cycle_id = %s AND puzzle_id = %s",
             (cycle_id, puzzle_id),
         )
 
@@ -550,23 +561,32 @@ async def finish_cycle(cycle_id: int, current_user=Depends(auth_module.require_c
     db = get_db()
     try:
         _load_owned_cycle(db, cycle_id, current_user["id"])
-        completed_count = db.execute(
-            "SELECT COUNT(*) AS n FROM cycle_completions WHERE cycle_id = %s",
+        completion_counts = db.execute(
+            """
+            SELECT
+                COUNT(*) AS completed_count,
+                COUNT(*) FILTER (WHERE solved) AS solved_count
+            FROM puzzle_completions
+            WHERE cycle_id = %s
+            """,
             (cycle_id,),
-        ).fetchone()["n"]
+        ).fetchone()
+        completed_count = completion_counts["completed_count"]
+        solved_count = completion_counts["solved_count"]
         db.execute(
             """
             UPDATE cycles
             SET completed_at = CURRENT_TIMESTAMP,
-                completed_count = %s
+                completed_count = %s,
+                solved_count = %s
             WHERE id = %s
             """,
-            (completed_count, cycle_id),
+            (completed_count, solved_count, cycle_id),
         )
         db.commit()
     finally:
         db.close()
-    return {"ok": True, "completed_count": completed_count}
+    return {"ok": True, "completed_count": completed_count, "solved_count": solved_count}
 
 
 @app.get("/api/sets/{set_id}/history")

@@ -29,7 +29,7 @@ interface TrainingPuzzleListProps {
   cycle: CycleRecord
   puzzles: CyclePuzzle[]
   currentPuzzleRef: RefObject<HTMLLIElement | null>
-  onCompletePuzzle: (puzzleId: string) => void | Promise<void>
+  onCompletePuzzle: (puzzleId: string, solved: boolean) => void | Promise<void>
   onUncompletePuzzle: (puzzleId: string) => void | Promise<void>
 }
 
@@ -38,12 +38,13 @@ type PuzzleResultAction = 'solved' | 'missed' | 'replace'
 interface PuzzleResultActionConfig {
   id: PuzzleResultAction
   label: string
+  solved: boolean
 }
 
 const PUZZLE_RESULT_ACTIONS: PuzzleResultActionConfig[] = [
-  { id: 'solved', label: 'Solved' },
-  { id: 'missed', label: 'Missed' },
-  { id: 'replace', label: 'Replace' },
+  { id: 'solved', label: 'Solved', solved: true },
+  { id: 'missed', label: 'Missed', solved: false },
+  { id: 'replace', label: 'Replace', solved: false },
 ]
 
 function toDateStr(date: Date): string {
@@ -283,9 +284,9 @@ export function TrainingPuzzleList({
     })
   }
 
-  function completeWithResultAction(puzzleId: string): void {
+  function completeWithResultAction(puzzleId: string, solved: boolean): void {
     try {
-      const completion = onCompletePuzzle(puzzleId)
+      const completion = onCompletePuzzle(puzzleId, solved)
       void Promise.resolve(completion)
         .then(() => clearPuzzleResultActions(puzzleId))
         .catch(() => undefined)
@@ -327,7 +328,9 @@ export function TrainingPuzzleList({
                   }
                 }}
               >
-                <span className="check">{puzzle.completed ? '\u2713' : ''}</span>
+                <span className={`check ${puzzle.completed && !puzzle.solved ? 'missed' : ''}`}>
+                  {puzzle.completed ? (puzzle.solved ? '\u2713' : '\u2715') : ''}
+                </span>
                 <span className="num">#{index + 1}</span>
                 <span className="puzzle-id">{puzzle.puzzle_id}</span>
                 {puzzle.completed && <span className="rating">{puzzle.rating}</span>}
@@ -341,7 +344,7 @@ export function TrainingPuzzleList({
                       className={`puzzle-result-button ${action.id}`}
                       aria-label={`${action.label} puzzle ${puzzle.puzzle_id}`}
                       title={action.label}
-                      onClick={() => completeWithResultAction(puzzle.puzzle_id)}
+                      onClick={() => completeWithResultAction(puzzle.puzzle_id, action.solved)}
                     >
                       <PuzzleResultIcon action={action.id} />
                     </button>
