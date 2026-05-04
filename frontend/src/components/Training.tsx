@@ -261,6 +261,7 @@ export function TrainingPuzzleList({
   const dailyGoal = Math.ceil(puzzles.length / schedule.days)
   const firstUncompleted = puzzles.findIndex(puzzle => !puzzle.completed)
   const [pendingResultPuzzleIds, setPendingResultPuzzleIds] = useState<Set<string>>(() => new Set())
+  const [replacingPuzzleIds, setReplacingPuzzleIds] = useState<Set<string>>(() => new Set())
 
   function showPuzzleResultActions(puzzleId: string): void {
     setPendingResultPuzzleIds(prev => {
@@ -286,6 +287,22 @@ export function TrainingPuzzleList({
     })
   }
 
+  function setPuzzleReplacing(puzzleId: string, isReplacing: boolean): void {
+    setReplacingPuzzleIds(prev => {
+      if (prev.has(puzzleId) === isReplacing) {
+        return prev
+      }
+
+      const next = new Set(prev)
+      if (isReplacing) {
+        next.add(puzzleId)
+      } else {
+        next.delete(puzzleId)
+      }
+      return next
+    })
+  }
+
   function completeWithResultAction(puzzleId: string, solved: boolean): void {
     try {
       const completion = onCompletePuzzle(puzzleId, solved)
@@ -298,12 +315,16 @@ export function TrainingPuzzleList({
   }
 
   function replaceWithResultAction(puzzleId: string): void {
+    setPuzzleReplacing(puzzleId, true)
+
     try {
       const replacement = onReplacePuzzle(puzzleId)
       void Promise.resolve(replacement)
         .then(() => clearPuzzleResultActions(puzzleId))
         .catch(() => undefined)
+        .finally(() => setPuzzleReplacing(puzzleId, false))
     } catch {
+      setPuzzleReplacing(puzzleId, false)
       // Keep the result buttons visible if replacement fails synchronously.
     }
   }
@@ -313,9 +334,12 @@ export function TrainingPuzzleList({
       {puzzles.map((puzzle, index) => {
         const showSeparator = index > 0 && index % dailyGoal === 0
         const dayNum = Math.floor(index / dailyGoal) + 1
-        const showResultActions = !puzzle.completed && pendingResultPuzzleIds.has(puzzle.puzzle_id)
-        const hasPreviousResult = !puzzle.completed && puzzle.previous_solved !== null
-        const resultIndicator = puzzle.completed
+        const isReplacing = replacingPuzzleIds.has(puzzle.puzzle_id)
+        const showResultActions = !puzzle.completed && !isReplacing && pendingResultPuzzleIds.has(puzzle.puzzle_id)
+        const hasPreviousResult = !puzzle.completed && !isReplacing && puzzle.previous_solved !== null
+        const resultIndicator = isReplacing
+          ? ''
+          : puzzle.completed
           ? (puzzle.solved ? '\u2713' : '\u2715')
           : hasPreviousResult
             ? (puzzle.previous_solved ? '\u2713' : '\u2715')
@@ -340,13 +364,21 @@ export function TrainingPuzzleList({
             {showSeparator && (
               <div className="day-separator">Day {dayNum}</div>
             )}
-            <div className={`puzzle-item ${puzzle.completed ? 'completed' : ''}`}>
+            <div
+              className={`puzzle-item ${puzzle.completed ? 'completed' : ''} ${isReplacing ? 'replacing' : ''}`}
+              aria-busy={isReplacing}
+            >
               <a
                 className="puzzle-link"
                 href={`https://lichess.org/training/${puzzle.puzzle_id}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={() => {
+                onClick={event => {
+                  if (isReplacing) {
+                    event.preventDefault()
+                    return
+                  }
+
                   if (!puzzle.completed) {
                     showPuzzleResultActions(puzzle.puzzle_id)
                   }
@@ -366,7 +398,9 @@ export function TrainingPuzzleList({
                   {resultIndicator}
                 </span>
                 <span className="num">#{index + 1}</span>
-                <span className="puzzle-id">{puzzle.puzzle_id}</span>
+                <span className={`puzzle-id ${isReplacing ? 'loading' : ''}`}>
+                  {isReplacing ? 'Loading new puzzle...' : puzzle.puzzle_id}
+                </span>
                 {puzzle.completed && <span className="rating">{puzzle.rating}</span>}
               </a>
               {showResultActions && (

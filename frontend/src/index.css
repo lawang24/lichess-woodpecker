@@ -245,6 +245,7 @@ li:has(+ li > .day-separator) .puzzle-item {
 .puzzle-item .check { color: var(--success); min-width: 20px; }
 .puzzle-item .check.missed { color: var(--danger); }
 .puzzle-item .check.previous { opacity: 0.55; }
+.puzzle-item.replacing { opacity: 0.75; }
 
 .puzzle-link {
   display: flex;
@@ -262,6 +263,10 @@ li:has(+ li > .day-separator) .puzzle-item {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.puzzle-id.loading {
+  color: var(--text-dim);
+  font-style: italic;
 }
 
 .puzzle-result-actions {
